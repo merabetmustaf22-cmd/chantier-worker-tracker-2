@@ -4,15 +4,14 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-# Configuration responsive mobile
 st.set_page_config(
-    page_title="Suivi Chantier & Matériaux",
+    page_title="Suivi Chantier Étanchéité",
     page_icon="🏗️",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_tracker_v6.db")
+DB_PATH = os.path.join("/tmp", "chantier_tracker_v7.db")
 
 LISTE_CHANTIERS = [
     "CAC-31-24",
@@ -121,14 +120,22 @@ def init_database():
             corps_etat TEXT,
             quantite REAL,
             unite TEXT,
-            conso_rouleaux REAL,
-            conso_primaire REAL,
-            conso_gaz REAL,
-            conso_elastotek REAL,
             observation TEXT,
             qualite_dechet TEXT,
             score REAL,
             FOREIGN KEY(worker_id) REFERENCES workers(id)
+        )
+    """)
+  c.execute("""
+        CREATE TABLE IF NOT EXISTS consommation_soir (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date_jour TEXT,
+            chantier TEXT,
+            rouleaux_pax REAL,
+            primaire REAL,
+            gaz REAL,
+            elastotek REAL,
+            remarque TEXT
         )
     """)
   for w in EFFECTIF_GLOBAL:
@@ -170,10 +177,6 @@ def get_rapports():
                 WHEN r.unite = 'Sans métrage' THEN 'Bricol / Jour'
                 ELSE r.quantite || ' ' || r.unite 
             END AS Production,
-            r.conso_rouleaux AS [Rouleaux PAX],
-            r.conso_primaire AS [Primaire (L/Fût)],
-            r.conso_gaz AS [Gaz (Btl)],
-            r.conso_elastotek AS [Élastotek (Kg/Seau)],
             COALESCE(r.observation, '-') AS Observation,
             r.qualite_dechet AS Qualite,
             CASE 
@@ -195,10 +198,6 @@ def get_rapports():
           "Statut",
           "Corps d'État",
           "Production",
-          "Rouleaux PAX",
-          "Primaire (L/Fût)",
-          "Gaz (Btl)",
-          "Élastotek (Kg/Seau)",
           "Observation",
           "Qualite",
           "Score",
@@ -206,19 +205,57 @@ def get_rapports():
   )
 
 
+def get_consommations():
+  init_database()
+  conn = sqlite3.connect(DB_PATH)
+  c = conn.cursor()
+  c.execute("""
+        SELECT 
+            date_jour AS Date,
+            chantier AS Chantier,
+            rouleaux_pax AS [Rouleaux PAX],
+            primaire AS [Primaire (L/Fût)],
+            gaz AS [Gaz (Btl)],
+            elastotek AS [Élastotek (Kg/Seau)],
+            COALESCE(remarque, '-') AS Remarque
+        FROM consommation_soir
+        ORDER BY id DESC
+    """)
+  rows = c.fetchall()
+  conn.close()
+  return pd.DataFrame(
+      rows,
+      columns=[
+          "Date",
+          "Chantier",
+          "Rouleaux PAX",
+          "Primaire (L/Fût)",
+          "Gaz (Btl)",
+          "Élastotek (Kg/Seau)",
+          "Remarque",
+      ],
+  )
+
+
 # --- INTERFACE ---
-st.title("🏗️ Suivi Chantier & Matériaux")
+st.title("🏗️ Suivi Chantier & Étanchéité")
 onglet = st.radio(
-    "Menu", ["Saisie Chantier", "Tableau de Bord"], horizontal=True
+    "Menu",
+    [
+        "Saisie Ouvrier",
+        "Bilan Matériaux (Soir)",
+        "Tableau de Bord",
+    ],
+    horizontal=True,
 )
 
-# 1. SAISIE DU CHANTIER
-if onglet == "Saisie Chantier":
-  st.subheader("Rapport Journalier & Consommation")
+# 1. SAISIE JOURNALIÈRE DES OUVRIERS
+if onglet == "Saisie Ouvrier":
+  st.subheader("Pointage & Rendement Ouvrier")
   df_w = get_workers()
   ouvriers_dict = dict(zip(df_w["nom"], df_w["id"]))
 
-  with st.form("form_saisie", clear_on_submit=True):
+  with st.form("form_saisie_ouvrier", clear_on_submit=True):
     col_a, col_b = st.columns(2)
     with col_a:
       chantier = st.selectbox("📍 Chantier", LISTE_CHANTIERS)
@@ -242,10 +279,6 @@ if onglet == "Saisie Chantier":
     quantite = 0.0
     unite = "m²"
     qualite = "-"
-    c_rouleaux = 0.0
-    c_primaire = 0.0
-    c_gaz = 0.0
-    c_elastotek = 0.0
 
     if "Absence" in statut:
       corps_etat = st.selectbox(
@@ -261,7 +294,6 @@ if onglet == "Saisie Chantier":
       )
     else:
       corps_etat = st.selectbox("🛠️ Corps d'état / Tâche", LISTE_CORPS_ETAT)
-
       est_bricol_auto = "BRICOL" in corps_etat.upper() or corps_etat in [
           "DIVERS",
           "nettoyage",
@@ -284,28 +316,8 @@ if onglet == "Saisie Chantier":
         unite = "Sans métrage"
         quantite = 1.0
 
-      st.markdown("##### 📦 Consommation des Matériaux")
-      mc1, mc2 = st.columns(2)
-      with mc1:
-        c_rouleaux = st.number_input(
-            "Rouleaux PAX / Bitume", min_value=0.0, step=0.5, value=0.0
-        )
-        c_primaire = st.number_input(
-            "Primaire / Vernis (L ou Fûts)",
-            min_value=0.0,
-            step=0.5,
-            value=0.0,
-        )
-      with mc2:
-        c_gaz = st.number_input(
-            "Gaz (Bouteilles)", min_value=0.0, step=0.25, value=0.0
-        )
-        c_elastotek = st.number_input(
-            "Élastotek (Kg ou Seaux)", min_value=0.0, step=0.5, value=0.0
-        )
-
       qualite = st.select_slider(
-          "Qualité / Propreté / Gestion des chutes",
+          "Qualité / Propreté / Chutes",
           options=[
               "Élevé (Mauvais)",
               "Moyen (Acceptable)",
@@ -315,13 +327,11 @@ if onglet == "Saisie Chantier":
       )
 
     observation = st.text_input(
-        "📝 Remarque / Observation / Stock restant",
-        placeholder=(
-            "Ex: recouvrement 10 cm respecté, manque chalumeau, etc."
-        ),
+        "📝 Remarque / Observation",
+        placeholder="Ex: travail en acrotère, retard, etc.",
     )
 
-    btn_valider = st.form_submit_button("Enregistrer la saisie")
+    btn_valider = st.form_submit_button("Enregistrer la saisie ouvrier")
 
     if btn_valider:
       if statut == "Absence autorisée / Justifiée":
@@ -354,8 +364,8 @@ if onglet == "Saisie Chantier":
       c.execute(
           """
                 INSERT INTO rapports_journaliers 
-                (date_jour, chantier, worker_id, statut, corps_etat, quantite, unite, conso_rouleaux, conso_primaire, conso_gaz, conso_elastotek, observation, qualite_dechet, score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (date_jour, chantier, worker_id, statut, corps_etat, quantite, unite, observation, qualite_dechet, score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
           (
               str(date_jour),
@@ -365,10 +375,6 @@ if onglet == "Saisie Chantier":
               corps_etat,
               quantite,
               unite,
-              c_rouleaux,
-              c_primaire,
-              c_gaz,
-              c_elastotek,
               observation,
               qualite,
               score,
@@ -378,62 +384,117 @@ if onglet == "Saisie Chantier":
       conn.close()
       st.success(f"Enregistré pour {nom_ouvrier} sur {chantier} !")
 
-# 2. TABLEAU DE BORD
+# 2. BILAN CONSOMMATION DU SOIR (PAR CHANTIER)
+elif onglet == "Bilan Matériaux (Soir)":
+  st.subheader("📦 Consommation Journalière du Soir")
+  st.caption(
+      "Enregistrez ici les quantités totales utilisées sur le chantier durant"
+      " la journée."
+  )
+
+  with st.form("form_conso_soir", clear_on_submit=True):
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+      c_chantier = st.selectbox("📍 Chantier", LISTE_CHANTIERS)
+    with col_c2:
+      c_date = st.date_input("📅 Date de consommation", value=date.today())
+
+    st.markdown("---")
+    m1, m2 = st.columns(2)
+    with m1:
+      conso_pax = st.number_input(
+          "Rouleaux PAX / Bitume posés", min_value=0.0, step=0.5, value=0.0
+      )
+      conso_prim = st.number_input(
+          "Primaire / Vernis (L ou Fûts)", min_value=0.0, step=0.5, value=0.0
+      )
+    with m2:
+      conso_gaz = st.number_input(
+          "Gaz brûlé (Bouteilles)", min_value=0.0, step=0.25, value=0.0
+      )
+      conso_elasto = st.number_input(
+          "Élastotek consommé (Kg/Seaux)", min_value=0.0, step=0.5, value=0.0
+      )
+
+    c_remarque = st.text_input(
+        "📝 Remarque stock (ex: stock restant faible, réapprovisionnement"
+        " nécessaire)"
+    )
+
+    btn_conso = st.form_submit_button("Enregistrer le bilan matière du soir")
+    if btn_conso:
+      conn = sqlite3.connect(DB_PATH)
+      c = conn.cursor()
+      c.execute(
+          """
+                INSERT INTO consommation_soir 
+                (date_jour, chantier, rouleaux_pax, primaire, gaz, elastotek, remarque)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+          (
+              str(c_date),
+              c_chantier,
+              conso_pax,
+              conso_prim,
+              conso_gaz,
+              conso_elasto,
+              c_remarque,
+          ),
+      )
+      conn.commit()
+      conn.close()
+      st.success(
+          f"Bilan matériaux enregistré pour {c_chantier} le {str(c_date)} !"
+      )
+
+# 3. TABLEAU DE BORD GLOBAL
 elif onglet == "Tableau de Bord":
-  st.subheader("Synthèse de l'Activité & Consommations")
+  st.subheader("Synthèse Globale du Chantier")
   df_r = get_rapports()
+  df_c = get_consommations()
 
-  if df_r.empty:
-    st.info("Aucune saisie enregistrée pour le moment.")
-  else:
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-      filtre_chantier = st.selectbox(
-          "Filtrer par Chantier", ["Tous"] + LISTE_CHANTIERS
-      )
-    with col_f2:
-      filtre_ouvrier = st.selectbox(
-          "Filtrer par Ouvrier", ["Tous"] + list(EFFECTIF_GLOBAL)
-      )
+  filtre_chantier = st.selectbox(
+      "Filtrer par Chantier", ["Tous"] + LISTE_CHANTIERS
+  )
 
-    df_affiche = df_r.copy()
-    if filtre_chantier != "Tous":
-      df_affiche = df_affiche[df_affiche["Chantier"] == filtre_chantier]
-    if filtre_ouvrier != "Tous":
-      df_affiche = df_affiche[df_affiche["Ouvrier"] == filtre_ouvrier]
+  df_affiche_r = df_r.copy()
+  df_affiche_c = df_c.copy()
 
-    # Synthèse des totaux consommés
-    st.markdown("#### 📊 Cumul Matériaux de la sélection")
+  if filtre_chantier != "Tous":
+    if not df_affiche_r.empty:
+      df_affiche_r = df_affiche_r[df_affiche_r["Chantier"] == filtre_chantier]
+    if not df_affiche_c.empty:
+      df_affiche_c = df_affiche_c[df_affiche_c["Chantier"] == filtre_chantier]
+
+  # Cartes des consommations enregistrées le soir
+  st.markdown("#### 📦 Matériaux consommés (Bilan du soir)")
+  if not df_affiche_c.empty:
     k1, k2, k3, k4 = st.columns(4)
     with k1:
       st.metric(
-          label="Total Rouleaux",
-          value=f"{round(df_affiche['Rouleaux PAX'].sum(), 1)} U",
+          label="Rouleaux PAX",
+          value=f"{round(df_affiche_c['Rouleaux PAX'].sum(), 1)} U",
       )
     with k2:
       st.metric(
-          label="Total Primaire",
-          value=f"{round(df_affiche['Primaire (L/Fût)'].sum(), 1)}",
+          label="Primaire",
+          value=f"{round(df_affiche_c['Primaire (L/Fût)'].sum(), 1)}",
       )
     with k3:
       st.metric(
-          label="Total Gaz",
-          value=f"{round(df_affiche['Gaz (Btl)'].sum(), 1)} Btl",
+          label="Gaz", value=f"{round(df_affiche_c['Gaz (Btl)'].sum(), 1)} Btl"
       )
     with k4:
       st.metric(
-          label="Total Élastotek",
-          value=f"{round(df_affiche['Élastotek (Kg/Seau)'].sum(), 1)}",
+          label="Élastotek",
+          value=f"{round(df_affiche_c['Élastotek (Kg/Seau)'].sum(), 1)}",
       )
+  else:
+    st.info("Aucun bilan matière du soir enregistré pour cette sélection.")
 
-    st.markdown("---")
-    st.dataframe(df_affiche, use_container_width=True, hide_index=True)
-
-    csv = df_affiche.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "📥 Exporter cette sélection (CSV)",
-        data=csv,
-        file_name="rapport_consommation_etancheite.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+  st.markdown("---")
+  st.markdown("#### 👷 Suivi des Ouvriers & Rendements")
+  if not df_affiche_r.empty:
+    st.dataframe(df_affiche_r, use_container_width=True, hide_index=True)
+  else:
+    st.info("Aucune saisie ouvrier enregistrée pour cette sélection.")
