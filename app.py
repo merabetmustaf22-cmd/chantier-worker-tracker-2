@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_roles_v37.db"
+DB_PATH = "chantier_roles_v38.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -207,8 +207,8 @@ def est_deja_valide(date_str, chantier):
   return count > 0
 
 
-def get_photo_path(nom_ouvrier):
-  nom_clean = nom_ouvrier.replace(" ", "_")
+def get_photo_path(identifiant):
+  nom_clean = identifiant.replace(" ", "_")
   for ext in [".jpg", ".jpeg", ".png"]:
     p = os.path.join(PHOTOS_DIR, f"{nom_clean}{ext}")
     if os.path.exists(p):
@@ -237,7 +237,18 @@ menu_general = st.radio(
 
 
 def interface_saisie_conducteur(conducteur_id_tag, default_nom):
-  st.subheader(f"Pointage Journalier — {default_nom}")
+  photo_cond = get_photo_path(conducteur_id_tag)
+  col_h1, col_h2 = st.columns([1, 4])
+  with col_h1:
+    if photo_cond:
+      st.image(photo_cond, width=70)
+    else:
+      st.markdown(
+          "<div style='font-size:45px;line-height:70px;text-align:center;'>👷</div>",
+          unsafe_allow_html=True,
+      )
+  with col_h2:
+    st.subheader(f"Pointage Journalier — {default_nom}")
 
   date_choisie = st.date_input(
       "📅 Date de saisie", value=date.today(), key=f"date_{conducteur_id_tag}"
@@ -294,8 +305,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
           st.image(photo_p, width=65)
         else:
           st.markdown(
-              "<div"
-              " style='font-size:40px;line-height:65px;text-align:center;'>👷</div>",
+              "<div style='font-size:40px;line-height:65px;text-align:center;'>👷</div>",
               unsafe_allow_html=True,
           )
       with col_tx:
@@ -383,7 +393,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
           with col_b2:
             obs_val = st.text_input(
                 "Détail du bricolage",
-                placeholder="Ex: traitement regard, solin...",
+                placeholder="Ex: étanchéité regard, solin...",
                 key=f"obs_br_{conducteur_id_tag}_{w_id}",
             )
       else:
@@ -490,7 +500,7 @@ elif menu_general == f"👷 Espace {nom_c2}":
   interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# 2. ESPACE ADMIN (GESTION CENTRALISÉE)
+# 2. ESPACE ADMIN
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
   st.subheader("Accès Sécurisé - Administration")
@@ -526,7 +536,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         [
             "📊 Registre & Rapport des Pointages",
             "👤 Fiches Ouvriers (Infos, Photos & Ajout)",
-            "👷 Noms des Conducteurs",
+            "👷 Fiches Conducteurs (Nom & Photo)",
             "🏗️ Affecter les Chantiers aux Conducteurs",
             "⚡ Fixer l'équipe d'un Chantier",
             "🔄 Transférer un ouvrier individuel",
@@ -589,9 +599,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
         df_filtre = df_hist.copy()
         if filtre_cond != "Tous les conducteurs":
-          df_filtre = df_filtre[
-              df_filtre["Conducteur"] == filtre_cond
-          ]
+          df_filtre = df_filtre[df_filtre["Conducteur"] == filtre_cond]
         if filtre_ch != "Tous les chantiers":
           df_filtre = df_filtre[df_filtre["Chantier"] == filtre_ch]
 
@@ -609,11 +617,8 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             use_container_width=True,
         )
 
-    # MODULE 2 : FICHES OUVRIERS COMBINÉES (INFOS + PHOTOS + AJOUT ENSEMBLE)
-    elif (
-        sous_menu_admin
-        == "👤 Fiches Ouvriers (Infos, Photos & Ajout)"
-    ):
+    # MODULE 2 : FICHES OUVRIERS (INFOS + PHOTOS)
+    elif sous_menu_admin == "👤 Fiches Ouvriers (Infos, Photos & Ajout)":
       st.markdown("#### Gestion Complète des Profils Ouvriers")
       df_w_admin = get_workers_df()
 
@@ -623,7 +628,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           "🗑️ Supprimer un ouvrier",
       ])
 
-      # 1. FICHE COMPLETE : MODIFIER NOM + PHOTO DIRECTEMENT ENSEMBLE
       with tab_fiche:
         ouvrier_sel = st.selectbox(
             "Sélectionner l'ouvrier à consulter / modifier :",
@@ -658,7 +662,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             conn = get_db_connection()
             c = conn.cursor()
 
-            # Renommage de l'ouvrier si changé
             if nom_propre and nom_propre != ouvrier_sel:
               try:
                 c.execute(
@@ -667,7 +670,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                 )
                 conn.commit()
 
-                # Renommage de l'ancienne photo pour le nouveau nom
                 old_clean = ouvrier_sel.replace(" ", "_")
                 new_clean = nom_propre.replace(" ", "_")
                 for ext in [".jpg", ".jpeg", ".png"]:
@@ -683,7 +685,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             else:
               nom_ref = ouvrier_sel
 
-            # Enregistrement du nouveau fichier photo s'il est uploadé
             if nouvelle_photo is not None:
               ext = nouvelle_photo.name.split(".")[-1].lower()
               nom_fichier_photo = f"{nom_ref.replace(' ', '_')}.{ext}"
@@ -697,7 +698,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             )
             st.rerun()
 
-      # 2. AJOUTER UN NOUVEL OUVRIER AVEC SA PHOTO
       with tab_nouvel:
         st.markdown("##### Enregistrer un nouvel ouvrier")
         col_n1, col_n2 = st.columns(2)
@@ -746,7 +746,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
               conn.close()
               st.error("Cet ouvrier est déjà enregistré.")
 
-      # 3. SUPPRESSION
       with tab_suppr:
         st.markdown("##### Retirer un ouvrier de l'effectif")
         ouvrier_a_del = st.selectbox(
@@ -774,40 +773,81 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           )
           st.rerun()
 
-    # MODULE 3 : CONDUCTEURS
-    elif sous_menu_admin == "👷 Noms des Conducteurs":
-      st.markdown("#### Personnalisation des Conducteurs de Travaux")
+    # MODULE 3 : FICHES CONDUCTEURS (NOM + PHOTO)
+    elif sous_menu_admin == "👷 Fiches Conducteurs (Nom & Photo)":
+      st.markdown("#### Gestion des Fiches des Conducteurs")
+      st.caption(
+          "Modifiez le nom et la photo de profil de chaque conducteur de"
+          " travaux."
+      )
 
-      col_ed1, col_ed2 = st.columns(2)
-      with col_ed1:
-        st.markdown("##### 👷 Conducteur 1")
-        new_nom_c1 = st.text_input(
-            "Nom affiché du Conducteur 1 :", value=nom_c1
+      cond_choisi_tag = st.radio(
+          "Sélectionner le profil à configurer :",
+          ["c1", "c2"],
+          format_func=lambda x: f"Conducteur 1 ({nom_c1})"
+          if x == "c1"
+          else f"Conducteur 2 ({nom_c2})",
+          horizontal=True,
+      )
+
+      nom_actuel = nom_c1 if cond_choisi_tag == "c1" else nom_c2
+      photo_actuelle_cond = get_photo_path(cond_choisi_tag)
+
+      col_cp, col_ci = st.columns([1, 2])
+      with col_cp:
+        if photo_actuelle_cond:
+          st.image(
+              photo_actuelle_cond,
+              caption=f"Photo actuelle : {nom_actuel}",
+              width=140,
+          )
+        else:
+          st.info("Aucune photo pour ce conducteur.")
+
+      with col_ci:
+        nouveau_nom_c = st.text_input(
+            "Nom affiché du conducteur :",
+            value=nom_actuel,
+            key=f"input_nom_cond_{cond_choisi_tag}",
+        )
+        nouvelle_photo_c = st.file_uploader(
+            "Télécharger la photo de profil",
+            type=["jpg", "jpeg", "png"],
+            key=f"upload_photo_cond_{cond_choisi_tag}",
         )
 
-      with col_ed2:
-        st.markdown("##### 👷 Conducteur 2")
-        new_nom_c2 = st.text_input(
-            "Nom affiché du Conducteur 2 :", value=nom_c2
-        )
+        if st.button(
+            "💾 Mettre à jour le profil du conducteur",
+            type="primary",
+            key=f"btn_save_cond_{cond_choisi_tag}",
+        ):
+          nom_net = nouveau_nom_c.strip() or (
+              "Conducteur 1" if cond_choisi_tag == "c1" else "Conducteur 2"
+          )
+          conn = get_db_connection()
+          c = conn.cursor()
+          c.execute(
+              "UPDATE conducteurs_meta SET nom_affiche = ? WHERE tag = ?",
+              (nom_net, cond_choisi_tag),
+          )
+          conn.commit()
+          conn.close()
 
-      if st.button("💾 Mettre à jour les noms des conducteurs", type="primary"):
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute(
-            "UPDATE conducteurs_meta SET nom_affiche = ? WHERE tag = 'c1'",
-            (new_nom_c1.strip() or "Conducteur 1",),
-        )
-        c.execute(
-            "UPDATE conducteurs_meta SET nom_affiche = ? WHERE tag = 'c2'",
-            (new_nom_c2.strip() or "Conducteur 2",),
-        )
-        conn.commit()
-        conn.close()
-        st.session_state["sync_notif"] = (
-            "✅ Noms des conducteurs mis à jour avec succès !"
-        )
-        st.rerun()
+          if nouvelle_photo_c is not None:
+            ext = nouvelle_photo_c.name.split(".")[-1].lower()
+            nom_f = f"{cond_choisi_tag}.{ext}"
+            for old_ext in [".jpg", ".jpeg", ".png"]:
+              ancien_f = os.path.join(PHOTOS_DIR, f"{cond_choisi_tag}{old_ext}")
+              if os.path.exists(ancien_f):
+                os.remove(ancien_f)
+            chemin_save = os.path.join(PHOTOS_DIR, nom_f)
+            img = Image.open(nouvelle_photo_c)
+            img.save(chemin_save)
+
+          st.session_state["sync_notif"] = (
+              f"✅ Profil et photo mis à jour pour {nom_net} !"
+          )
+          st.rerun()
 
     # MODULE 4 : ATTRIBUTION DES CHANTIERS
     elif sous_menu_admin == "🏗️ Affecter les Chantiers aux Conducteurs":
