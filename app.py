@@ -4,7 +4,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-# Configuration de la page
+# Configuration mobile
 st.set_page_config(
     page_title="Suivi Chantier Étanchéité",
     page_icon="🏗️",
@@ -12,9 +12,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_tracker_v3.db")
+DB_PATH = os.path.join("/tmp", "chantier_tracker_v4.db")
 
-# Liste des 14 Chantiers
+# 14 Chantiers
 LISTE_CHANTIERS = [
     "CAC-31-24",
     "CMA-09-23",
@@ -224,7 +224,6 @@ if onglet == "Saisie Chantier":
 
     quantite = 0.0
     unite = "m²"
-    observation = ""
     qualite = "Faible (Très bien)"
 
     if statut != "Absent / Congé / Maladie":
@@ -249,9 +248,6 @@ if onglet == "Saisie Chantier":
       else:
         unite = "Sans métrage"
         quantite = 1.0
-        observation = st.text_input(
-            "Détail du travail / Bricol", placeholder="Précisez le travail"
-        )
 
       qualite = st.select_slider(
           "Qualité / Propreté / Chutes",
@@ -262,6 +258,14 @@ if onglet == "Saisie Chantier":
           ],
           value="Faible (Très bien)",
       )
+
+    # Champ observation TOUJOURS visible
+    observation = st.text_input(
+        "📝 Remarque / Observation",
+        placeholder=(
+            "Ex: reprise chéneau, zone acrotère, manque matière, retard, etc."
+        ),
+    )
 
     btn_valider = st.form_submit_button("Enregistrer la saisie")
 
