@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_roles_v34.db"
+DB_PATH = "chantier_roles_v35.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -124,7 +124,7 @@ def init_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date_jour TEXT NOT NULL,
             chantier TEXT NOT NULL,
-            conducteur TEXT NOT NULL DEFAULT 'Non spécifié',
+            conducteur TEXT NOT NULL DEFAULT 'Conducteur',
             worker_id INTEGER NOT NULL,
             statut TEXT,
             tache TEXT,
@@ -215,24 +215,16 @@ menu_general = st.radio(
 def interface_saisie_conducteur(conducteur_id_tag, default_nom):
   st.subheader(f"Pointage Journalier — {default_nom}")
 
-  col_cond, col_dt = st.columns(2)
-  with col_cond:
-    nom_conducteur = st.text_input(
-        "Nom du Conducteur / Responsable de saisie",
-        value=st.session_state.get(f"memo_{conducteur_id_tag}", default_nom),
-        key=f"nom_cond_{conducteur_id_tag}",
-    )
-    st.session_state[f"memo_{conducteur_id_tag}"] = nom_conducteur
-  with col_dt:
-    date_choisie = st.date_input(
-        "📅 Date", value=date.today(), key=f"date_{conducteur_id_tag}"
-    )
+  # Sélection de la date sans champ de texte inutile
+  date_choisie = st.date_input(
+      "📅 Date de saisie", value=date.today(), key=f"date_{conducteur_id_tag}"
+  )
 
   chantiers_autorises = get_chantiers_conducteur(conducteur_id_tag)
 
   if not chantiers_autorises:
     st.warning(
-        f"⚠️ Aucun chantier n'est actuellement attribué à {default_nom}.\n\n"
+        f"⚠️️ Aucun chantier n'est actuellement attribué à {default_nom}.\n\n"
         "L'administrateur doit vous affecter vos chantiers dans l'Espace Admin."
     )
     return
@@ -404,8 +396,6 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
       conn = get_db_connection()
       c = conn.cursor()
 
-      nom_final_conducteur = nom_conducteur.strip() if nom_conducteur else default_nom
-
       for w_id, d in donnees_ouvriers.items():
         st_val = d["statut"]
         qte = d["quantite"]
@@ -444,7 +434,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             (
                 date_str,
                 chantier_choisi,
-                nom_final_conducteur,
+                default_nom,
                 w_id,
                 st_val,
                 d["tache"],
@@ -461,8 +451,8 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 
       heure_validation = datetime.now().strftime("%H:%M:%S")
       st.session_state["sync_notif"] = (
-          f"✅ Journée enregistrée par {nom_final_conducteur} à"
-          f" {heure_validation} pour {chantier_choisi} !"
+          f"✅ Journée enregistrée par {default_nom} à {heure_validation} pour"
+          f" {chantier_choisi} !"
       )
       st.rerun()
 
@@ -477,7 +467,7 @@ elif menu_general == "👷 Espace Conducteur 2":
   interface_saisie_conducteur("c2", "Conducteur 2")
 
 # ==============================================================================
-# 2. ESPACE ADMIN (GESTION & REGISTRE AVEC CONDUCTEUR)
+# 2. ESPACE ADMIN (GESTION & REGISTRE)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
   st.subheader("Accès Sécurisé - Administration")
@@ -522,7 +512,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
     st.markdown("---")
 
-    # MODULE RAPPORT & REGISTRE (CONDUCTEUR EN EVIDENCE)
+    # MODULE RAPPORT & REGISTRE
     if (
         sous_menu_admin
         == "📊 Registre & Rapport des Pointages (Par Conducteur)"
@@ -533,7 +523,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             SELECT 
                 p.date_jour AS [Date],
                 p.chantier AS [Chantier],
-                p.conducteur AS [Conducteur (Auteur Saisie)],
+                p.conducteur AS [Conducteur],
                 w.nom AS [Ouvrier],
                 p.statut AS [Statut],
                 p.tache AS [Tâche],
@@ -558,11 +548,10 @@ elif menu_general == "🔐 Espace Admin (Direction)":
       if df_hist.empty:
         st.info("Aucune saisie enregistrée dans la base de données.")
       else:
-        # Filtres interactifs pour affiner le rapport
         c_f1, c_f2 = st.columns(2)
         with c_f1:
           conducteurs_trouves = sorted(
-              df_hist["Conducteur (Auteur Saisie)"].dropna().unique().tolist()
+              df_hist["Conducteur"].dropna().unique().tolist()
           )
           filtre_cond = st.selectbox(
               "Filtrer par Conducteur :",
@@ -579,9 +568,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
         df_filtre = df_hist.copy()
         if filtre_cond != "Tous les conducteurs":
-          df_filtre = df_filtre[
-              df_filtre["Conducteur (Auteur Saisie)"] == filtre_cond
-          ]
+          df_filtre = df_filtre[df_filtre["Conducteur"] == filtre_cond]
         if filtre_ch != "Tous les chantiers":
           df_filtre = df_filtre[df_filtre["Chantier"] == filtre_ch]
 
