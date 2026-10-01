@@ -12,13 +12,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_roles_v40.db"
+DB_PATH = "chantier_roles_v41.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
 ADMIN_PASSWORD = "admin"
 
-LISTE_CHANTIERS = [
+LISTE_CHANTIERS_INIT = [
     "CAC-31-24",
     "CMA-09-23",
     "ECOLE SBA",
@@ -36,7 +36,7 @@ LISTE_CHANTIERS = [
     "EN ATTENTE / DEPOT",
 ]
 
-LISTE_TACHES = [
+LISTE_TACHES_INIT = [
     "PAX",
     "PARE-VAPEUR",
     "SOKLE PARE-VAPEUR",
@@ -105,6 +105,18 @@ def init_database():
   conn = get_db_connection()
   c = conn.cursor()
   c.execute("""
+        CREATE TABLE IF NOT EXISTS chantiers_ref (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom TEXT NOT NULL UNIQUE
+        )
+    """)
+  c.execute("""
+        CREATE TABLE IF NOT EXISTS taches_ref (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom TEXT NOT NULL UNIQUE
+        )
+    """)
+  c.execute("""
         CREATE TABLE IF NOT EXISTS workers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nom TEXT NOT NULL UNIQUE,
@@ -143,6 +155,16 @@ def init_database():
             FOREIGN KEY(worker_id) REFERENCES workers(id)
         )
     """)
+
+  # Insertion initiale des chantiers
+  for ch in LISTE_CHANTIERS_INIT:
+    c.execute("INSERT OR IGNORE INTO chantiers_ref (nom) VALUES (?)", (ch,))
+
+  # Insertion initiale des tâches / corps d'état
+  for tch in LISTE_TACHES_INIT:
+    c.execute("INSERT OR IGNORE INTO taches_ref (nom) VALUES (?)", (tch,))
+
+  # Conducteurs
   c.execute(
       "INSERT OR IGNORE INTO conducteurs_meta (tag, nom_affiche) VALUES ('c1',"
       " 'Conducteur 1')"
@@ -152,6 +174,7 @@ def init_database():
       " 'Conducteur 2')"
   )
 
+  # Effectif initial
   for w in EFFECTIF_GLOBAL_INIT:
     c.execute(
         "INSERT OR IGNORE INTO workers (nom, chantier_fixe) VALUES (?, ?)",
@@ -162,6 +185,24 @@ def init_database():
 
 
 init_database()
+
+
+def get_all_chantiers():
+  conn = get_db_connection()
+  c = conn.cursor()
+  c.execute("SELECT nom FROM chantiers_ref ORDER BY nom ASC")
+  res = [row[0] for row in c.fetchall()]
+  conn.close()
+  return res
+
+
+def get_all_taches():
+  conn = get_db_connection()
+  c = conn.cursor()
+  c.execute("SELECT nom FROM taches_ref ORDER BY nom ASC")
+  res = [row[0] for row in c.fetchall()]
+  conn.close()
+  return res
 
 
 def get_conducteurs_dict():
@@ -294,6 +335,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     )
   else:
     donnees_ouvriers = {}
+    toutes_les_taches = get_all_taches()
 
     for _, row in equipe_active.iterrows():
       w_id = row["id"]
@@ -334,8 +376,8 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
         col_t1, col_t2 = st.columns(2)
         with col_t1:
           tache_val = st.selectbox(
-              "Tâche effectuée",
-              LISTE_TACHES,
+              "Tâche / Corps d'état",
+              toutes_les_taches,
               key=f"tch_{conducteur_id_tag}_{w_id}",
           )
         with col_t2:
@@ -502,7 +544,7 @@ elif menu_general == f"👷 Espace {nom_c2}":
   interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# 2. ESPACE ADMIN (AVEC NAVIGATION PAR CASES / CARTES)
+# 2. ESPACE ADMIN (AVEC GESTION DES CHANTIERS & CORPS D'ÉTAT)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
   st.subheader("Accès Sécurisé - Administration")
@@ -535,11 +577,15 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         st.session_state["admin_active_module"] = None
         st.rerun()
 
-    # Initialisation de la case active
     if "admin_active_module" not in st.session_state:
       st.session_state["admin_active_module"] = None
 
     MODULES_ADMIN = [
+        (
+            "mod_chantiers_taches",
+            "🏗️ Chantiers & Corps d'état",
+            "Ajouter, modifier ou supprimer des chantiers et des tâches",
+        ),
         (
             "mod_profils",
             "👥 Profils & Photos",
@@ -547,7 +593,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         ),
         (
             "mod_chantiers_cond",
-            "🏗️ Chantiers / Conducteurs",
+            "👷 Chantiers / Conducteurs",
             "Attribuer les chantiers sous la responsabilité de chacun",
         ),
         (
@@ -558,12 +604,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         (
             "mod_transfert",
             "🔄 Transfert d'Ouvrier",
-            "Déplacer rapidement un ouvrier d'un chantier à un autre",
-        ),
-        (
-            "mod_vue_globale",
-            "📋 Répartition Globale",
-            "Consulter la liste de tous les ouvriers par chantier",
+            "Déplacer un ouvrier vers un autre chantier de façon unique",
         ),
         (
             "mod_rapport",
@@ -572,19 +613,17 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         ),
     ]
 
-    # AFFICHAGE DES CASES / CARTES SI AUCUN MODULE N'EST OUVERT
+    # AFFICHAGE DES CASES / CARTES
     if st.session_state["admin_active_module"] is None:
-      st.markdown("### 🎛️️ Panneau de Contrôle Administrateur")
+      st.markdown("### 🎛 Panneau de Contrôle Administrateur")
       st.caption(
           "Cliquez sur une case pour ouvrir le module d'administration"
           " correspondant :"
       )
 
-      # Grille en 2 colonnes
       for i in range(0, len(MODULES_ADMIN), 2):
         col_c1, col_c2 = st.columns(2)
 
-        # Case 1
         tag1, titre1, desc1 = MODULES_ADMIN[i]
         with col_c1:
           st.markdown(
@@ -602,7 +641,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             st.session_state["admin_active_module"] = tag1
             st.rerun()
 
-        # Case 2 (si existante)
         if i + 1 < len(MODULES_ADMIN):
           tag2, titre2, desc2 = MODULES_ADMIN[i + 1]
           with col_c2:
@@ -623,19 +661,236 @@ elif menu_general == "🔐 Espace Admin (Direction)":
               st.session_state["admin_active_module"] = tag2
               st.rerun()
 
-    # AFFICHAGE DU MODULE CHOISI AVEC BOUTON RETOUR
+    # DÉROULEMENT DU MODULE CHOISI
     else:
       mod_actuel = st.session_state["admin_active_module"]
 
-      # Bouton Retour au menu principal des cases
       if st.button("⬅️ Retour au tableau des cases", type="secondary"):
         st.session_state["admin_active_module"] = None
         st.rerun()
 
       st.markdown("---")
 
-      # 1. MODULE PROFILS & PHOTOS
-      if mod_actuel == "mod_profils":
+      # 1. NOUVEAU MODULE : GESTION DES CHANTIERS & CORPS D'ÉTAT (TACHES)
+      if mod_actuel == "mod_chantiers_taches":
+        st.markdown(
+            "### 🏗️ Gestion des Chantiers & Corps d'état (Tâches / Activités)"
+        )
+        st.caption(
+            "Toute modification, ajout ou suppression est enregistrée en base"
+            " de données et synchronisée en temps réel pour tous les"
+            " conducteurs."
+        )
+
+        tab_ch, tab_tch = st.tabs(
+            ["📍 Gestion des Chantiers", "🔨 Gestion des Corps d'état (Tâches)"]
+        )
+
+        # GESTION DES CHANTIERS
+        with tab_ch:
+          liste_actuelle_ch = get_all_chantiers()
+          sub_ch1, sub_ch2, sub_ch3 = st.tabs(
+              ["➕ Nouveau Chantier", "✏️ Modifier un Chantier", "🗑️ Supprimer"]
+          )
+
+          with sub_ch1:
+            st.markdown("##### Ajouter un nouveau projet / chantier")
+            nouveau_chantier_nom = st.text_input(
+                "Nom du nouveau chantier :",
+                placeholder="Ex: TOUR RESIDENTIELLE ORAN",
+                key="in_add_ch",
+            )
+            if st.button("➕ Ajouter le chantier", type="primary"):
+              nom_c_clean = nouveau_chantier_nom.strip()
+              if nom_c_clean:
+                conn = get_db_connection()
+                c = conn.cursor()
+                try:
+                  c.execute(
+                    "INSERT INTO chantiers_ref (nom) VALUES (?)", (nom_c_clean,)
+                  )
+                  conn.commit()
+                  conn.close()
+                  st.session_state["sync_notif"] = (
+                      f"✅ Chantier {nom_c_clean} ajouté avec succès !"
+                  )
+                  st.rerun()
+                except sqlite3.IntegrityError:
+                  conn.close()
+                  st.error("Ce chantier existe déjà.")
+
+          with sub_ch2:
+            st.markdown("##### Renommer un chantier existant")
+            ch_a_modifier = st.selectbox(
+                "Sélectionner le chantier à renommer :",
+                liste_actuelle_ch,
+                key="sel_mod_ch",
+            )
+            ch_nouveau_nom = st.text_input(
+                "Nouveau nom :", value=ch_a_modifier, key="in_renom_ch"
+            )
+
+            if st.button("💾 Enregistrer la modification du nom"):
+              nom_n_clean = ch_nouveau_nom.strip()
+              if nom_n_clean and nom_n_clean != ch_a_modifier:
+                conn = get_db_connection()
+                c = conn.cursor()
+                try:
+                  c.execute(
+                      "UPDATE chantiers_ref SET nom = ? WHERE nom = ?",
+                      (nom_n_clean, ch_a_modifier),
+                  )
+                  c.execute(
+                      "UPDATE workers SET chantier_fixe = ? WHERE"
+                      " chantier_fixe = ?",
+                      (nom_n_clean, ch_a_modifier),
+                  )
+                  c.execute(
+                      "UPDATE conducteur_chantiers SET chantier = ? WHERE"
+                      " chantier = ?",
+                      (nom_n_clean, ch_a_modifier),
+                  )
+                  c.execute(
+                      "UPDATE pointages SET chantier = ? WHERE chantier = ?",
+                      (nom_n_clean, ch_a_modifier),
+                  )
+                  conn.commit()
+                  conn.close()
+                  st.session_state["sync_notif"] = (
+                      f"✅ Chantier renommé de {ch_a_modifier} vers"
+                      f" {nom_n_clean} !"
+                  )
+                  st.rerun()
+                except sqlite3.IntegrityError:
+                  conn.close()
+                  st.error("Ce nom de chantier existe déjà.")
+
+          with sub_ch3:
+            st.markdown("##### Supprimer un chantier")
+            ch_a_suppr = st.selectbox(
+                "Sélectionner le chantier à retirer :",
+                [c for c in liste_actuelle_ch if c != "EN ATTENTE / DEPOT"],
+                key="sel_del_ch",
+            )
+            if st.button(
+                f"❌ Supprimer définitivement {ch_a_suppr}", type="secondary"
+            ):
+              conn = get_db_connection()
+              c = conn.cursor()
+              c.execute(
+                  "DELETE FROM chantiers_ref WHERE nom = ?", (ch_a_suppr,)
+              )
+              c.execute(
+                  "UPDATE workers SET chantier_fixe = 'EN ATTENTE / DEPOT'"
+                  " WHERE chantier_fixe = ?",
+                  (ch_a_suppr,),
+              )
+              c.execute(
+                  "DELETE FROM conducteur_chantiers WHERE chantier = ?",
+                  (ch_a_suppr,),
+              )
+              conn.commit()
+              conn.close()
+              st.session_state["sync_notif"] = (
+                  f"🗑️ Chantier {ch_a_suppr} supprimé. Ses ouvriers ont été"
+                  " basculés en Attente."
+              )
+              st.rerun()
+
+        # GESTION DES TACHES / CORPS D'ÉTAT
+        with tab_tch:
+          liste_actuelle_tch = get_all_taches()
+          sub_t1, sub_t2, sub_t3 = st.tabs(
+              ["➕ Nouveau Corps d'état", "✏️ Modifier", "🗑️ Supprimer"]
+          )
+
+          with sub_t1:
+            st.markdown("##### Ajouter un nouveau corps d'état / tâche")
+            nouvelle_tache_nom = st.text_input(
+                "Nom de la nouvelle tâche :",
+                placeholder="Ex: ÉTANCHÉITÉ BITUMINEUSE BICOUCHE",
+                key="in_add_tch",
+            )
+            if st.button("➕ Ajouter la tâche", type="primary"):
+              nom_t_clean = nouvelle_tache_nom.strip()
+              if nom_t_clean:
+                conn = get_db_connection()
+                c = conn.cursor()
+                try:
+                  c.execute(
+                      "INSERT INTO taches_ref (nom) VALUES (?)", (nom_t_clean,)
+                  )
+                  conn.commit()
+                  conn.close()
+                  st.session_state["sync_notif"] = (
+                      f"✅ Activité / Corps d'état {nom_t_clean} ajouté avec"
+                      " succès !"
+                  )
+                  st.rerun()
+                except sqlite3.IntegrityError:
+                  conn.close()
+                  st.error("Cette tâche existe déjà.")
+
+          with sub_t2:
+            st.markdown("##### Renommer un corps d'état existant")
+            tch_a_modifier = st.selectbox(
+                "Sélectionner la tâche à renommer :",
+                liste_actuelle_tch,
+                key="sel_mod_tch",
+            )
+            tch_nouveau_nom = st.text_input(
+                "Nouveau libellé :", value=tch_a_modifier, key="in_renom_tch"
+            )
+
+            if st.button("💾 Enregistrer la modification de la tâche"):
+              nom_nt_clean = tch_nouveau_nom.strip()
+              if nom_nt_clean and nom_nt_clean != tch_a_modifier:
+                conn = get_db_connection()
+                c = conn.cursor()
+                try:
+                  c.execute(
+                      "UPDATE taches_ref SET nom = ? WHERE nom = ?",
+                      (nom_nt_clean, tch_a_modifier),
+                  )
+                  c.execute(
+                      "UPDATE pointages SET tache = ? WHERE tache = ?",
+                      (nom_nt_clean, tch_a_modifier),
+                  )
+                  conn.commit()
+                  conn.close()
+                  st.session_state["sync_notif"] = (
+                      f"✅ Tâche renommée de {tch_a_modifier} vers"
+                      f" {nom_nt_clean} !"
+                  )
+                  st.rerun()
+                except sqlite3.IntegrityError:
+                  conn.close()
+                  st.error("Ce nom de tâche existe déjà.")
+
+          with sub_t3:
+            st.markdown("##### Supprimer un corps d'état")
+            tch_a_suppr = st.selectbox(
+                "Sélectionner la tâche à retirer :",
+                liste_actuelle_tch,
+                key="sel_del_tch",
+            )
+            if st.button(
+                f"❌ Supprimer {tch_a_suppr}",
+                type="secondary",
+                key="btn_del_tch",
+            ):
+              conn = get_db_connection()
+              c = conn.cursor()
+              c.execute("DELETE FROM taches_ref WHERE nom = ?", (tch_a_suppr,))
+              conn.commit()
+              conn.close()
+              st.session_state["sync_notif"] = (
+                  f"🗑️ Corps d'état {tch_a_suppr} supprimé."
+              )
+              st.rerun()
+
+      # 2. MODULE PROFILS & PHOTOS
+      elif mod_actuel == "mod_profils":
         st.markdown(
             "### 👥 Gestion des Profils & Photos (Conducteurs & Ouvriers)"
         )
@@ -809,9 +1064,10 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                   placeholder="Ex: BENKADDOUR Karim",
                   key="in_new_worker_nom_tab",
               )
+              chantiers_options = get_all_chantiers()
               chantier_init = st.selectbox(
                   "Chantier initial :",
-                  LISTE_CHANTIERS,
+                  chantiers_options,
                   key="sel_new_worker_ch_tab",
               )
             with col_add2:
@@ -822,7 +1078,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
               )
 
             if st.button(
-                "➕ Ajouter l'ouvrier",
+                "➕ Ajouter l'ouvrier avec son profil",
                 type="primary",
                 key="btn_add_worker_tab",
             ):
@@ -882,13 +1138,13 @@ elif menu_general == "🔐 Espace Admin (Direction)":
               )
               st.rerun()
 
-      # 2. MODULE CHANTIERS / CONDUCTEURS
+      # 3. MODULE CHANTIERS / CONDUCTEURS
       elif mod_actuel == "mod_chantiers_cond":
         st.markdown(
             "### 🏗️ Attribution des Chantiers aux Conducteurs de Travaux"
         )
         chantiers_disponibles = [
-            c for c in LISTE_CHANTIERS if c != "EN ATTENTE / DEPOT"
+            c for c in get_all_chantiers() if c != "EN ATTENTE / DEPOT"
         ]
 
         col_c1, col_c2 = st.columns(2)
@@ -951,13 +1207,14 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           )
           st.rerun()
 
-      # 3. MODULE EQUIPES PAR CHANTIER
+      # 4. MODULE EQUIPES PAR CHANTIER
       elif mod_actuel == "mod_equipes":
         st.markdown("### ⚡ Définir l'équipe autorisée sur un chantier")
+        chantiers_dispos = [
+            c for c in get_all_chantiers() if c != "EN ATTENTE / DEPOT"
+        ]
         ch_cible = st.selectbox(
-            "Chantier à configurer :",
-            [c for c in LISTE_CHANTIERS if c != "EN ATTENTE / DEPOT"],
-            key="adm_ch_cible",
+            "Chantier à configurer :", chantiers_dispos, key="adm_ch_cible"
         )
 
         df_w_admin = get_workers_df()
@@ -1005,7 +1262,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           )
           st.rerun()
 
-      # 4. MODULE TRANSFERT
+      # 5. MODULE TRANSFERT
       elif mod_actuel == "mod_transfert":
         st.markdown(
             "### 🔄 Transférer un ouvrier vers un autre chantier de façon"
@@ -1024,9 +1281,10 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
         st.info(f"Chantier actuel : **{ancien_ch}**")
 
+        chantiers_tous = get_all_chantiers()
         dest_ch = st.selectbox(
             "Nouveau chantier de destination :",
-            [c for c in LISTE_CHANTIERS if c != ancien_ch],
+            [c for c in chantiers_tous if c != ancien_ch],
             key="dest_ch_sel",
         )
 
@@ -1048,27 +1306,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
               f"🔄 Transfert effectué : {ouvrier_sel} ➔ {dest_ch}"
           )
           st.rerun()
-
-      # 5. MODULE VUE GLOBALE
-      elif mod_actuel == "mod_vue_globale":
-        st.markdown("### 📋 Répartition Globale des Effectifs")
-        df_w_admin = get_workers_df()
-
-        filtre = st.selectbox(
-            "Filtrer par Chantier :", ["Tous les chantiers"] + LISTE_CHANTIERS
-        )
-        if filtre != "Tous les chantiers":
-          df_show = df_w_admin[df_w_admin["chantier_fixe"] == filtre]
-        else:
-          df_show = df_w_admin
-
-        st.dataframe(
-            df_show[["nom", "chantier_fixe"]].rename(
-                columns={"nom": "Ouvrier", "chantier_fixe": "Chantier Fixé"}
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
 
       # 6. MODULE REGISTRE & RAPPORT
       elif mod_actuel == "mod_rapport":
