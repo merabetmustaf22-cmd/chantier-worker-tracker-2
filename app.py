@@ -4,9 +4,9 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-# Configuration responsive adaptée aux smartphones
+# Configuration mobile
 st.set_page_config(
-    page_title="Suivi Chantier",
+    page_title="Suivi Chantier & Étanchéité",
     page_icon="🏗️",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -14,7 +14,69 @@ st.set_page_config(
 
 DB_PATH = os.path.join("/tmp", "chantier_tracker.db")
 
-# Liste de votre effectif global
+# Vos 14 Chantiers réels
+LISTE_CHANTIERS = [
+    "CAC-31-24",
+    "CMA-09-23",
+    "ECOLE SBA",
+    "GROUPEMENT GENDARMERIE",
+    "HOB-342-08-24",
+    "HTA ZONE SBA",
+    "IZM-31-24(CES)",
+    "LBU-31-23",
+    "LCP-31-24",
+    "MARAVAL",
+    "VILLA CITE EL RIAD ORAN",
+    "VILLA Hasnaoui MAKAM",
+    "VILLA Hasnaoui Outhman",
+    "ESC-16-24",
+]
+
+# Vos Corps d'état & Tâches réelles
+LISTE_CORPS_ETAT = [
+    "CONGÉ",
+    "MALADIE",
+    "RECUPERATION",
+    "1/2 journée",
+    "Absence autorisée",
+    "PAX",
+    "PARE-VAPEUR",
+    "SOKLE PARE-VAPEUR",
+    "ELASTOTEK",
+    "ELASTOTEK GOURGE",
+    "ELASTOTEK JOINTAGE",
+    "ELASTOTEK LEVI",
+    "ELASTOTEK NETTOYAGE",
+    "ELASTOTEK Ponçage",
+    "ELASTOTEK RESERVE",
+    "ELASTOTEK SAUPOUDRAGE",
+    "Forme de pente",
+    "GOURGE",
+    "JOINT DE DILATATION",
+    "MASTIC",
+    "nettoyage",
+    "PONSAGE",
+    "décapage",
+    "BACHE A EAU",
+    "PISCINE",
+    "SOUS CARRELAGE",
+    "TEST EAU",
+    "coupe-feu",
+    "Couvre-joint",
+    "DALLE Cheminée",
+    "regard",
+    "Traitement de l'ascenseur",
+    "BRICOL",
+    "BRICOL ELASTOTEK",
+    "BRICOL SILICONE",
+    "BRICOL SOKLE",
+    "BRICOL SOUS CARRELAGE",
+    "BRICOL PARE-VAPEUR",
+    "BRICOL Cheminée",
+    "DIVERS",
+]
+
+# Votre effectif de 23 ouvriers
 EFFECTIF_GLOBAL = [
     "ADDA Abbess",
     "MEKHACHEF DJAMEL",
@@ -44,20 +106,22 @@ EFFECTIF_GLOBAL = [
 
 def get_connection():
   conn = sqlite3.connect(DB_PATH)
-  cursor = conn.cursor()
-  cursor.execute("""
+  c = conn.cursor()
+  c.execute("""
         CREATE TABLE IF NOT EXISTS workers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nom TEXT NOT NULL UNIQUE,
             fonction TEXT NOT NULL
         )
     """)
-  cursor.execute("""
-        CREATE TABLE IF NOT EXISTS performances (
+  c.execute("""
+        CREATE TABLE IF NOT EXISTS rapports_journaliers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            worker_id INTEGER,
             date_jour TEXT,
-            presence INTEGER,
+            chantier TEXT,
+            worker_id INTEGER,
+            statut TEXT,
+            corps_etat TEXT,
             quantite REAL,
             unite TEXT,
             qualite_dechet TEXT,
@@ -68,14 +132,10 @@ def get_connection():
     """)
   conn.commit()
 
-  # Insertion automatique de l'effectif s'il n'est pas déjà présent
-  for ouvrier in EFFECTIF_GLOBAL:
-    cursor.execute(
-        """
-            INSERT OR IGNORE INTO workers (nom, fonction) 
-            VALUES (?, ?)
-        """,
-        (ouvrier, "Applicateur / Équipe Chantier"),
+  for w in EFFECTIF_GLOBAL:
+    c.execute(
+        "INSERT OR IGNORE INTO workers (nom, fonction) VALUES (?, ?)",
+        (w, "Applicateur Étanchéité"),
     )
   conn.commit()
   return conn
@@ -83,186 +143,187 @@ def get_connection():
 
 def get_workers():
   conn = get_connection()
-  cursor = conn.cursor()
-  cursor.execute("SELECT id, nom, fonction FROM workers ORDER BY nom ASC")
-  rows = cursor.fetchall()
+  c = conn.cursor()
+  c.execute("SELECT id, nom FROM workers ORDER BY nom ASC")
+  rows = c.fetchall()
   conn.close()
-  return pd.DataFrame(rows, columns=["id", "nom", "fonction"])
+  return pd.DataFrame(rows, columns=["id", "nom"])
 
 
-def get_performances():
+def get_rapports():
   conn = get_connection()
-  cursor = conn.cursor()
-  cursor.execute("""
+  c = conn.cursor()
+  c.execute("""
         SELECT 
-            p.date_jour AS Date,
+            r.date_jour AS Date,
+            r.chantier AS Chantier,
             w.nom AS Ouvrier,
-            w.fonction AS Fonction,
-            p.quantite || ' ' || p.unite AS Rendement,
-            p.qualite_dechet AS Qualite,
-            p.score AS Score
-        FROM performances p
-        JOIN workers w ON p.worker_id = w.id
-        ORDER BY p.id DESC
+            r.statut AS Statut,
+            r.corps_etat AS [Corps d'État],
+            r.quantite || ' ' || r.unite AS Production,
+            r.qualite_dechet AS Qualite,
+            r.score AS Score
+        FROM rapports_journaliers r
+        JOIN workers w ON r.worker_id = w.id
+        ORDER BY r.id DESC
     """)
-  rows = cursor.fetchall()
+  rows = c.fetchall()
   conn.close()
   return pd.DataFrame(
       rows,
-      columns=["Date", "Ouvrier", "Fonction", "Rendement", "Qualite", "Score"],
+      columns=[
+          "Date",
+          "Chantier",
+          "Ouvrier",
+          "Statut",
+          "Corps d'État",
+          "Production",
+          "Qualite",
+          "Score",
+      ],
   )
 
 
-# --- CALCUL DU SCORE (0 à 100) ---
-def calculer_score(presence, quantite, qualite, hse):
-  if not presence:
-    return 0.0
-
-  score = 30.0  # Présence (30 pts)
-
-  # Productivité (max 40 pts)
-  if quantite >= 40.0:
-    score += 40.0
-  elif quantite >= 25.0:
-    score += 30.0
-  elif quantite > 0.0:
-    score += 15.0
-
-  # Qualité / Déchets (max 15 pts)
-  if qualite == "Faible (Très bien)":
-    score += 15.0
-  elif qualite == "Moyen (Acceptable)":
-    score += 10.0
-  else:
-    score += 0.0
-
-  # Respect HSE (max 15 pts)
-  if hse:
-    score += 15.0
-
-  return min(score, 100.0)
-
-
 # --- INTERFACE ---
-st.title("🏗️ Suivi Chantier")
+st.title("🏗️ Suivi Chantier Étanchéité")
 onglet = st.radio(
-    "Navigation",
-    ["Saisie du Jour", "Tableau de Bord", "Gestion Ouvriers"],
-    horizontal=True,
+    "Menu", ["Saisie Chantier", "Tableau de Bord"], horizontal=True
 )
 
-# 1. SAISIE DU JOUR (Par défaut en premier)
-if onglet == "Saisie du Jour":
-  st.subheader("Pointage & Rendement")
+# 1. SAISIE DU CHANTIER
+if onglet == "Saisie Chantier":
+  st.subheader("Rapport Journalier de Pose")
   df_w = get_workers()
-
   ouvriers_dict = dict(zip(df_w["nom"], df_w["id"]))
-  with st.form("form_perf", clear_on_submit=True):
-    nom_select = st.selectbox(
-        "Sélectionner l'ouvrier", list(ouvriers_dict.keys())
-    )
-    date_saisie = st.date_input("Date", value=date.today())
-    presence = st.toggle("Présent sur chantier", value=True)
 
-    col1, col2 = st.columns(2)
-    with col1:
-      quantite = st.number_input(
-          "Production réalisée", min_value=0.0, step=1.0, value=25.0
+  with st.form("form_saisie", clear_on_submit=True):
+    col_a, col_b = st.columns(2)
+    with col_a:
+      chantier = st.selectbox("📍 Chantier", LISTE_CHANTIERS)
+    with col_b:
+      date_jour = st.date_input("📅 Date", value=date.today())
+
+    st.markdown("---")
+    nom_ouvrier = st.selectbox(
+        "👷 Ouvrier", list(ouvriers_dict.keys())
+    )
+
+    statut = st.radio(
+        "Statut de la journée",
+        ["Présent (Travail)", "1/2 journée", "Absent / Congé / Maladie"],
+        horizontal=True,
+    )
+
+    corps_etat = st.selectbox("🛠️ Corps d'état / Tâche", LISTE_CORPS_ETAT)
+
+    quantite = 0.0
+    unite = "m²"
+    qualite = "Faible (Très bien)"
+    hse = True
+
+    if statut != "Absent / Congé / Maladie":
+      c1, c2 = st.columns(2)
+      with c1:
+        quantite = st.number_input(
+            "Production réalisée", min_value=0.0, step=0.5, value=25.0
+        )
+      with c2:
+        unite = st.selectbox("Unité", ["m²", "ml", "Unité", "Fût", "Bricol"])
+
+      qualite = st.select_slider(
+          "Qualité / Déchets & Chutes",
+          options=[
+              "Élevé (Mauvais)",
+              "Moyen (Acceptable)",
+              "Faible (Très bien)",
+          ],
+          value="Faible (Très bien)",
       )
-    with col2:
-      unite = st.selectbox("Unité", ["m²", "ml", "Unité"])
+      hse = st.checkbox("Respect HSE & EPI obligatoires", value=True)
 
-    qualite = st.select_slider(
-        "Niveau de chutes / déchets",
-        options=["Élevé (Mauvais)", "Moyen (Acceptable)", "Faible (Très bien)"],
-        value="Faible (Très bien)",
-    )
-    hse = st.checkbox("Port complet des EPI (Casque, gants, etc.)", value=True)
+    btn_valider = st.form_submit_button("Enregistrer la saisie")
 
-    btn_save = st.form_submit_button("Valider la journée")
-    if btn_save:
-      score_calc = calculer_score(presence, quantite, qualite, hse)
+    if btn_valider:
+      # Calcul automatique du score
+      if statut == "Absent / Congé / Maladie":
+        score = 0.0
+      else:
+        score = 30.0 if statut == "Présent (Travail)" else 15.0
+        if quantite >= 40:
+          score += 40
+        elif quantite >= 25:
+          score += 30
+        elif quantite > 0:
+          score += 15
+
+        if qualite == "Faible (Très bien)":
+          score += 15
+        elif qualite == "Moyen (Acceptable)":
+          score += 10
+
+        if hse:
+          score += 15
+        score = min(score, 100.0)
+
       conn = get_connection()
-      cursor = conn.cursor()
-      cursor.execute(
+      c = conn.cursor()
+      c.execute(
           """
-                INSERT INTO performances (worker_id, date_jour, presence, quantite, unite, qualite_dechet, hse_conforme, score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO rapports_journaliers 
+                (date_jour, chantier, worker_id, statut, corps_etat, quantite, unite, qualite_dechet, hse_conforme, score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
           (
-              ouvriers_dict[nom_select],
-              str(date_saisie),
-              int(presence),
+              str(date_jour),
+              chantier,
+              ouvriers_dict[nom_ouvrier],
+              statut,
+              corps_etat,
               quantite,
               unite,
               qualite,
               int(hse),
-              score_calc,
+              score,
           ),
       )
       conn.commit()
       conn.close()
-      st.success(f"Enregistré ! Score attribué : {score_calc} / 100")
+      st.success(
+          f"Enregistré pour {nom_ouvrier} sur {chantier} (Score: {score}/100) !"
+      )
 
 # 2. TABLEAU DE BORD
 elif onglet == "Tableau de Bord":
-  st.subheader("Performances de l'équipe")
-  df_p = get_performances()
+  st.subheader("Synthèse de l'Activité")
+  df_r = get_rapports()
 
-  if df_p.empty:
-    st.info("Aucune saisie enregistrée pour le moment.")
+  if df_r.empty:
+    st.info("Aucune saisie effectuée pour le moment.")
   else:
-    col1, col2 = st.columns(2)
-    with col1:
-      st.metric(
-          label="Score Moyen Équipe",
-          value=f"{round(df_p['Score'].mean(), 1)} / 100",
+    # Filtres rapides
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+      filtre_chantier = st.selectbox(
+          "Filtrer par Chantier", ["Tous"] + LISTE_CHANTIERS
       )
-    with col2:
-      st.metric(label="Total Saisies", value=len(df_p))
+    with col_f2:
+      filtre_ouvrier = st.selectbox(
+          "Filtrer par Ouvrier", ["Tous"] + list(EFFECTIF_GLOBAL)
+      )
 
-    st.dataframe(df_p, use_container_width=True, hide_index=True)
+    df_affiche = df_r.copy()
+    if filtre_chantier != "Tous":
+      df_affiche = df_affiche[df_affiche["Chantier"] == filtre_chantier]
+    if filtre_ouvrier != "Tous":
+      df_affiche = df_affiche[df_affiche["Ouvrier"] == filtre_ouvrier]
 
-    csv = df_p.to_csv(index=False).encode("utf-8")
+    st.dataframe(df_affiche, use_container_width=True, hide_index=True)
+
+    csv = df_affiche.to_csv(index=False).encode("utf-8")
     st.download_button(
-        "📥 Exporter les données (CSV)",
+        "📥 Exporter cette sélection (CSV)",
         data=csv,
-        file_name="suivi_rendement_ouvriers.csv",
+        file_name="rapport_chantiers_etancheite.csv",
         mime="text/csv",
         use_container_width=True,
     )
-
-# 3. GESTION DES OUVRIERS
-elif onglet == "Gestion Ouvriers":
-  st.subheader("Effectif du Chantier")
-  df_w = get_workers()
-  st.dataframe(
-      df_w[["nom", "fonction"]], use_container_width=True, hide_index=True
-  )
-
-  st.divider()
-  st.subheader("Ajouter un nouvel ouvrier")
-  with st.form("form_worker", clear_on_submit=True):
-    nom = st.text_input("Nom & Prénom")
-    fonction = st.selectbox(
-        "Fonction / Spécialité",
-        [
-            "Applicateur Étanchéité",
-            "Manoeuvre",
-            "Chef d'équipe",
-            "Maçon",
-            "Ferrailleur",
-        ],
-    )
-    btn_ajouter = st.form_submit_button("Enregistrer")
-    if btn_ajouter and nom.strip():
-      conn = get_connection()
-      cursor = conn.cursor()
-      cursor.execute(
-          "INSERT OR IGNORE INTO workers (nom, fonction) VALUES (?, ?)",
-          (nom.strip(), fonction),
-      )
-      conn.commit()
-      conn.close()
-      st.success(f"Ouvrier {nom} ajouté !")
-      st.rerun()
