@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_roles_v31.db"
+DB_PATH = "chantier_roles_v32.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -215,7 +215,6 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
         "📅 Date", value=date.today(), key=f"date_{conducteur_id_tag}"
     )
 
-  # Chantiers assignés par l'administrateur à ce conducteur
   chantiers_autorises = get_chantiers_conducteur(conducteur_id_tag)
 
   if not chantiers_autorises:
@@ -226,233 +225,219 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     return
 
   chantier_choisi = st.selectbox(
-      "📍 Sélectionner votre Chantier",
+      "📍 Sélectionner le Chantier",
       chantiers_autorises,
       key=f"ch_sel_{conducteur_id_tag}",
   )
 
+  # Récupération automatique et directe des ouvriers affectés à ce chantier
   df_w = get_workers_df()
-  equipe_fixee_admin = df_w[df_w["chantier_fixe"] == chantier_choisi][
-      "nom"
-  ].tolist()
+  equipe_active = df_w[df_w["chantier_fixe"] == chantier_choisi]
 
-  if not equipe_fixee_admin:
+  st.markdown(
+      f"#### 👷 Équipe présente sur **{chantier_choisi}** :"
+      f" `{len(equipe_active)}` ouvrier(s)"
+  )
+
+  if equipe_active.empty:
     st.warning(
-        f"⚠️ Aucun ouvrier n'est rattaché à {chantier_choisi} par"
-        " l'administrateur."
+        f"⚠️ Aucun ouvrier n'est actuellement rattaché à {chantier_choisi}.\n\n"
+        "L'administrateur doit affecter l'équipe dans l'Espace Admin."
     )
   else:
-    default_sel = (
-        equipe_fixee_admin[:2]
-        if len(equipe_fixee_admin) >= 2
-        else equipe_fixee_admin
-    )
-    ouvriers_choisis = st.multiselect(
-        "👥 Ouvriers sous contrôle aujourd'hui (sélectionnez les 2 ouvriers) :",
-        options=equipe_fixee_admin,
-        default=default_sel,
-        key=f"ms_ouv_{conducteur_id_tag}",
-    )
+    donnees_ouvriers = {}
 
-    df_actifs = df_w[df_w["nom"].isin(ouvriers_choisis)]
+    # Affichage direct de tous les ouvriers affectés au chantier
+    for _, row in equipe_active.iterrows():
+      w_id = row["id"]
+      w_nom = row["nom"]
+      photo_p = get_photo_path(w_nom)
 
-    if df_actifs.empty:
-      st.info("Veuillez sélectionner au moins un ouvrier pour le pointage.")
-    else:
-      st.markdown(
-          f"#### 📝 Fiche de pointage ({len(df_actifs)} ouvrier(s) sélectionné(s))"
-      )
-      donnees_ouvriers = {}
-
-      for _, row in df_actifs.iterrows():
-        w_id = row["id"]
-        w_nom = row["nom"]
-        photo_p = get_photo_path(w_nom)
-
-        col_av, col_tx = st.columns([1, 4])
-        with col_av:
-          if photo_p:
-            st.image(photo_p, width=65)
-          else:
-            st.markdown(
-                "<div"
-                " style='font-size:40px;line-height:65px;text-align:center;'>👷</div>",
-                unsafe_allow_html=True,
-            )
-        with col_tx:
-          st.markdown(f"### {w_nom}")
-
-        st_val = st.selectbox(
-            "Statut de présence",
-            [
-                "Présent (Journée)",
-                "1/2 journée",
-                "Absence Autorisée (Congé/Maladie)",
-                "Absence Non Autorisée (Injustifiée)",
-            ],
-            key=f"st_{conducteur_id_tag}_{w_id}",
-        )
-
-        tache_val = "-"
-        qte_val = 0.0
-        unite_val = "-"
-        apprec_val = "-"
-        obs_val = ""
-
-        if "Présent" in st_val or "1/2" in st_val:
-          col_t1, col_t2 = st.columns(2)
-          with col_t1:
-            tache_val = st.selectbox(
-                "Tâche effectuée",
-                LISTE_TACHES,
-                key=f"tch_{conducteur_id_tag}_{w_id}",
-            )
-          with col_t2:
-            est_bricol_defaut = "BRICOL" in tache_val.upper() or tache_val in [
-                "DIVERS",
-                "nettoyage",
-                "PONSAGE",
-            ]
-            type_travail = st.selectbox(
-                "Type d'activité",
-                ["Métrage (m² / ml)", "Bricol / Sans métrage"],
-                index=1 if est_bricol_defaut else 0,
-                key=f"typ_{conducteur_id_tag}_{w_id}",
-            )
-
-          if type_travail == "Métrage (m² / ml)":
-            col_r1, col_r2, col_r3 = st.columns([1.5, 1.5, 2])
-            with col_r1:
-              qte_val = st.number_input(
-                  "Production",
-                  min_value=0.0,
-                  step=1.0,
-                  value=25.0,
-                  key=f"qte_{conducteur_id_tag}_{w_id}",
-              )
-              unite_val = "m²"
-            with col_r2:
-              apprec_val = st.selectbox(
-                  "Qualité d'exécution",
-                  [
-                      "🟢 Conforme / Soigné",
-                      "🟡 Moyen / Acceptable",
-                      "🔴 Non conforme / À reprendre",
-                  ],
-                  key=f"app_{conducteur_id_tag}_{w_id}",
-              )
-            with col_r3:
-              obs_val = st.text_input(
-                  "Observation",
-                  placeholder="Ex: terrasse sud, relevés...",
-                  key=f"obs_{conducteur_id_tag}_{w_id}",
-              )
-          else:
-            unite_val = "Sans métrage"
-            qte_val = 1.0
-            col_b1, col_b2 = st.columns([1.5, 2.5])
-            with col_b1:
-              apprec_val = st.selectbox(
-                  "Qualité d'exécution",
-                  [
-                      "🟢 Conforme / Soigné",
-                      "🟡 Moyen / Acceptable",
-                      "🔴 Non conforme / À reprendre",
-                  ],
-                  key=f"app_br_{conducteur_id_tag}_{w_id}",
-              )
-            with col_b2:
-              obs_val = st.text_input(
-                  "Détail du bricolage",
-                  placeholder="Ex: traitement regard, solin...",
-                  key=f"obs_br_{conducteur_id_tag}_{w_id}",
-              )
+      col_av, col_tx = st.columns([1, 4])
+      with col_av:
+        if photo_p:
+          st.image(photo_p, width=65)
         else:
-          obs_val = st.text_input(
-              "Motif de l'absence",
-              placeholder="Ex: arrêt maladie, congé...",
-              key=f"obs_abs_{conducteur_id_tag}_{w_id}",
+          st.markdown(
+              "<div"
+              " style='font-size:40px;line-height:65px;text-align:center;'>👷</div>",
+              unsafe_allow_html=True,
+          )
+      with col_tx:
+        st.markdown(f"### {w_nom}")
+
+      st_val = st.selectbox(
+          "Statut de présence",
+          [
+              "Présent (Journée)",
+              "1/2 journée",
+              "Absence Autorisée (Congé/Maladie)",
+              "Absence Non Autorisée (Injustifiée)",
+          ],
+          key=f"st_{conducteur_id_tag}_{w_id}",
+      )
+
+      tache_val = "-"
+      qte_val = 0.0
+      unite_val = "-"
+      apprec_val = "-"
+      obs_val = ""
+
+      # Ouvrier présent ou demi-journée
+      if "Présent" in st_val or "1/2" in st_val:
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+          tache_val = st.selectbox(
+              "Tâche effectuée",
+              LISTE_TACHES,
+              key=f"tch_{conducteur_id_tag}_{w_id}",
+          )
+        with col_t2:
+          est_bricol_defaut = "BRICOL" in tache_val.upper() or tache_val in [
+              "DIVERS",
+              "nettoyage",
+              "PONSAGE",
+          ]
+          type_travail = st.selectbox(
+              "Type d'activité",
+              ["Métrage (m² / ml)", "Bricol / Sans métrage"],
+              index=1 if est_bricol_defaut else 0,
+              key=f"typ_{conducteur_id_tag}_{w_id}",
           )
 
-        st.markdown("---")
-
-        donnees_ouvriers[w_id] = {
-            "statut": st_val,
-            "tache": tache_val,
-            "quantite": qte_val,
-            "unite": unite_val,
-            "appreciation": apprec_val,
-            "observation": obs_val,
-        }
-
-      if st.button(
-          "💾 Valider le pointage des ouvriers",
-          type="primary",
-          use_container_width=True,
-          key=f"btn_val_{conducteur_id_tag}",
-      ):
-        conn = get_db_connection()
-        c = conn.cursor()
-
-        for w_id, d in donnees_ouvriers.items():
-          st_val = d["statut"]
-          qte = d["quantite"]
-          unite = d["unite"]
-          app = d["appreciation"]
-
-          if "Présent" in st_val:
-            base_p = 40.0
-            pts_prod = (
-                40.0
-                if (unite == "Sans métrage" or qte >= 30)
-                else (30.0 if qte >= 20 else 15.0)
+        if type_travail == "Métrage (m² / ml)":
+          col_r1, col_r2, col_r3 = st.columns([1.5, 1.5, 2])
+          with col_r1:
+            qte_val = st.number_input(
+                "Production réalisée",
+                min_value=0.0,
+                step=1.0,
+                value=25.0,
+                key=f"qte_{conducteur_id_tag}_{w_id}",
             )
-            pts_app = (
-                20.0
-                if "Conforme" in app
-                else (
-                    10.0
-                    if "Moyen" in app
-                    else (0.0 if "Non conforme" in app else 10.0)
-                )
+            unite_val = "m²"
+          with col_r2:
+            apprec_val = st.selectbox(
+                "Qualité d'exécution",
+                [
+                    "🟢 Conforme / Soigné",
+                    "🟡 Moyen / Acceptable",
+                    "🔴 Non conforme / À reprendre",
+                ],
+                key=f"app_{conducteur_id_tag}_{w_id}",
             )
-            score = min(base_p + pts_prod + pts_app, 100.0)
-          elif "1/2" in st_val:
-            score = 35.0
-          elif "Autorisée" in st_val:
-            score = None
-          else:
-            score = 0.0
-
-          c.execute(
-              """
-                    INSERT INTO pointages (date_jour, chantier, conducteur, worker_id, statut, tache, quantite, unite, appreciation, observation, score)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-              (
-                  str(date_choisie),
-                  chantier_choisi,
-                  nom_conducteur if nom_conducteur else default_nom,
-                  w_id,
-                  st_val,
-                  d["tache"],
-                  qte,
-                  unite,
-                  app,
-                  d["observation"],
-                  score,
-              ),
-          )
-
-        conn.commit()
-        conn.close()
-
-        heure_validation = datetime.now().strftime("%H:%M:%S")
-        st.session_state["sync_notif"] = (
-            f"✅ Pointage validé par {nom_conducteur} à {heure_validation} pour"
-            f" {chantier_choisi} ({len(donnees_ouvriers)} ouvrier(s)) !"
+          with col_r3:
+            obs_val = st.text_input(
+                "Observation libre",
+                placeholder="Ex: terrasse sud, relevés...",
+                key=f"obs_{conducteur_id_tag}_{w_id}",
+            )
+        else:
+          unite_val = "Sans métrage"
+          qte_val = 1.0
+          col_b1, col_b2 = st.columns([1.5, 2.5])
+          with col_b1:
+            apprec_val = st.selectbox(
+                "Qualité d'exécution",
+                [
+                    "🟢 Conforme / Soigné",
+                    "🟡 Moyen / Acceptable",
+                    "🔴 Non conforme / À reprendre",
+                ],
+                key=f"app_br_{conducteur_id_tag}_{w_id}",
+            )
+          with col_b2:
+            obs_val = st.text_input(
+                "Détail du bricolage",
+                placeholder="Ex: traitement relevé, regard...",
+                key=f"obs_br_{conducteur_id_tag}_{w_id}",
+            )
+      else:
+        obs_val = st.text_input(
+            "Motif de l'absence",
+            placeholder="Ex: arrêt maladie, congé...",
+            key=f"obs_abs_{conducteur_id_tag}_{w_id}",
         )
-        st.rerun()
+
+      st.markdown("---")
+
+      donnees_ouvriers[w_id] = {
+          "statut": st_val,
+          "tache": tache_val,
+          "quantite": qte_val,
+          "unite": unite_val,
+          "appreciation": apprec_val,
+          "observation": obs_val,
+      }
+
+    if st.button(
+        "💾 Valider la journée de l'équipe",
+        type="primary",
+        use_container_width=True,
+        key=f"btn_val_{conducteur_id_tag}",
+    ):
+      conn = get_db_connection()
+      c = conn.cursor()
+
+      for w_id, d in donnees_ouvriers.items():
+        st_val = d["statut"]
+        qte = d["quantite"]
+        unite = d["unite"]
+        app = d["appreciation"]
+
+        if "Présent" in st_val:
+          base_p = 40.0
+          pts_prod = (
+              40.0
+              if (unite == "Sans métrage" or qte >= 30)
+              else (30.0 if qte >= 20 else 15.0)
+          )
+          pts_app = (
+              20.0
+              if "Conforme" in app
+              else (
+                  10.0
+                  if "Moyen" in app
+                  else (0.0 if "Non conforme" in app else 10.0)
+              )
+          )
+          score = min(base_p + pts_prod + pts_app, 100.0)
+        elif "1/2" in st_val:
+          score = 35.0
+        elif "Autorisée" in st_val:
+          score = None
+        else:
+          score = 0.0
+
+        c.execute(
+            """
+                INSERT INTO pointages (date_jour, chantier, conducteur, worker_id, statut, tache, quantite, unite, appreciation, observation, score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(date_choisie),
+                chantier_choisi,
+                nom_conducteur if nom_conducteur else default_nom,
+                w_id,
+                st_val,
+                d["tache"],
+                qte,
+                unite,
+                app,
+                d["observation"],
+                score,
+            ),
+        )
+
+      conn.commit()
+      conn.close()
+
+      heure_validation = datetime.now().strftime("%H:%M:%S")
+      st.session_state["sync_notif"] = (
+          f"✅ Journée validée par {nom_conducteur} à {heure_validation} pour"
+          f" {chantier_choisi} ({len(donnees_ouvriers)} ouvrier(s)) !"
+      )
+      st.rerun()
 
 
 # ==============================================================================
@@ -515,7 +500,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
       st.markdown("#### Attribution des chantiers sous responsabilité")
       st.caption(
           "Sélectionnez les chantiers dont chaque conducteur est responsable."
-          " Il ne pourra voir et pointer que ces chantiers."
+          " Le conducteur ne verra que les chantiers cochés ici."
       )
 
       chantiers_disponibles = [
@@ -552,7 +537,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         conn = get_db_connection()
         c = conn.cursor()
 
-        # Réinitialisation et enregistrement pour Conducteur 1
         c.execute(
             "DELETE FROM conducteur_chantiers WHERE conducteur_tag = 'c1'"
         )
@@ -563,7 +547,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
               (ch,),
           )
 
-        # Réinitialisation et enregistrement pour Conducteur 2
         c.execute(
             "DELETE FROM conducteur_chantiers WHERE conducteur_tag = 'c2'"
         )
@@ -733,7 +716,10 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           st.rerun()
 
     # MODULE 6 : HISTORIQUE
-    elif sous_menu_admin == "📊 Historique des Pointages":
+    elif (
+        sous_menu_admin
+        == "📊 Historique des Pointages"
+    ):
       st.markdown("#### Registre des Saisies avec Conducteur de Travaux")
       conn = get_db_connection()
       query = """
