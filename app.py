@@ -1,9 +1,10 @@
-from datetime import date
+import os
 import sqlite3
+from datetime import date
 import pandas as pd
 import streamlit as st
 
-# Configuration de la page (adaptée smartphone)
+# Configuration responsive adaptée aux smartphones
 st.set_page_config(
     page_title="Suivi Chantier",
     page_icon="🏗️",
@@ -11,69 +12,74 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_tracker.db"
+# Chemin garanti accessible en écriture sur Streamlit Cloud
+DB_PATH = os.path.join("/tmp", "chantier_tracker.db")
 
 
-# --- INITIALISATION SÉCURISÉE DE LA BASE DE DONNÉES ---
-def init_db():
-  with sqlite3.connect(DB_PATH) as conn:
-    cursor = conn.cursor()
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS workers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nom TEXT NOT NULL,
-                fonction TEXT NOT NULL
-            )
-        """)
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS performances (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                worker_id INTEGER,
-                date_jour TEXT,
-                presence INTEGER,
-                quantite REAL,
-                unite TEXT,
-                qualite_dechet TEXT,
-                hse_conforme INTEGER,
-                score REAL,
-                FOREIGN KEY(worker_id) REFERENCES workers(id)
-            )
-        """)
-    conn.commit()
+def get_connection():
+  conn = sqlite3.connect(DB_PATH)
+  cursor = conn.cursor()
+  cursor.execute(
+      """
+        CREATE TABLE IF NOT EXISTS workers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom TEXT NOT NULL,
+            fonction TEXT NOT NULL
+        )
+    """
+  )
+  cursor.execute(
+      """
+        CREATE TABLE IF NOT EXISTS performances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            worker_id INTEGER,
+            date_jour TEXT,
+            presence INTEGER,
+            quantite REAL,
+            unite TEXT,
+            qualite_dechet TEXT,
+            hse_conforme INTEGER,
+            score REAL,
+            FOREIGN KEY(worker_id) REFERENCES workers(id)
+        )
+    """
+  )
+  conn.commit()
+  return conn
 
 
-# Lancer l'initialisation au démarrage
-init_db()
-
-
-# Fonctions utilitaires pour lire la base sans bug Pandas
 def get_workers():
-  with sqlite3.connect(DB_PATH) as conn:
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, nom, fonction FROM workers ORDER BY nom ASC")
-    rows = cursor.fetchall()
-    return pd.DataFrame(rows, columns=["id", "nom", "fonction"])
+  conn = get_connection()
+  cursor = conn.cursor()
+  cursor.execute("SELECT id, nom, fonction FROM workers ORDER BY nom ASC")
+  rows = cursor.fetchall()
+  conn.close()
+  return pd.DataFrame(rows, columns=["id", "nom", "fonction"])
 
 
 def get_performances():
-  with sqlite3.connect(DB_PATH) as conn:
-    cursor = conn.cursor()
-    cursor.execute("""
-            SELECT 
-                p.date_jour AS Date,
-                w.nom AS Ouvrier,
-                w.fonction AS Fonction,
-                p.quantite || ' ' || p.unite AS Rendement,
-                p.qualite_dechet AS Qualite,
-                p.score AS Score
-            FROM performances p
-            JOIN workers w ON p.worker_id = w.id
-            ORDER BY p.id DESC
-        """)
-    rows = cursor.fetchall()
-    return pd.DataFrame(
-        rows, columns=["Date", "Ouvrier", "Fonction", "Rendement", "Qualite", "Score"]
-    )
+  conn = get_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      """
+        SELECT 
+            p.date_jour AS Date,
+            w.nom AS Ouvrier,
+            w.fonction AS Fonction,
+            p.quantite || ' ' || p.unite AS Rendement,
+            p.qualite_dechet AS Qualite,
+            p.score AS Score
+        FROM performances p
+        JOIN workers w ON p.worker_id = w.id
+        ORDER BY p.id DESC
+    """
+  )
+  rows = cursor.fetchall()
+  conn.close()
+  return pd.DataFrame(
+      rows,
+      columns=["Date", "Ouvrier", "Fonction", "Rendement", "Qualite", "Score"],
+  )
 
 
 # --- CALCUL DU SCORE (0 à 100) ---
@@ -91,7 +97,7 @@ def calculer_score(presence, quantite, qualite, hse):
   elif quantite > 0.0:
     score += 15.0
 
-  # Qualité / Déchets (max 15 pts)
+  # Qualité / Réduction des pertes (max 15 pts)
   if qualite == "Faible (Très bien)":
     score += 15.0
   elif qualite == "Moyen (Acceptable)":
@@ -99,7 +105,7 @@ def calculer_score(presence, quantite, qualite, hse):
   else:
     score += 0.0
 
-  # Respect HSE / EPI (max 15 pts)
+  # Sécurité HSE (max 15 pts)
   if hse:
     score += 15.0
 
@@ -131,20 +137,26 @@ if onglet == "Gestion Ouvriers":
     )
     btn_ajouter = st.form_submit_button("Enregistrer")
     if btn_ajouter and nom.strip():
-      with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO workers (nom, fonction) VALUES (?, ?)",
-            (nom.strip(), fonction),
-        )
-        conn.commit()
+      conn = get_connection()
+      cursor = conn.cursor()
+      cursor.execute(
+          "INSERT INTO workers (nom, fonction) VALUES (?, ?)",
+          (nom.strip(), fonction),
+      )
+      conn.commit()
+      conn.close()
       st.success(f"Ouvrier {nom} ajouté !")
       st.rerun()
 
   st.divider()
   st.subheader("Liste de l'équipe")
   df_w = get_workers()
-  st.dataframe(df_w[["nom", "fonction"]], use_container_width=True, hide_index=True)
+  if not df_w.empty:
+    st.dataframe(
+        df_w[["nom", "fonction"]], use_container_width=True, hide_index=True
+    )
+  else:
+    st.write("Aucun ouvrier pour l'instant.")
 
 # 2. SAISIE DU JOUR
 elif onglet == "Saisie du Jour":
@@ -153,13 +165,15 @@ elif onglet == "Saisie du Jour":
 
   if df_w.empty:
     st.info(
-        "Aucun ouvrier enregistré. Allez d'abord dans l'onglet 'Gestion Ouvriers'"
-        " pour ajouter votre équipe."
+        "👉 Aucun ouvrier enregistré. Allez d'abord dans l'onglet 'Gestion"
+        " Ouvriers' pour ajouter votre équipe."
     )
   else:
     ouvriers_dict = dict(zip(df_w["nom"], df_w["id"]))
     with st.form("form_perf", clear_on_submit=True):
-      nom_select = st.selectbox("Sélectionner l'ouvrier", list(ouvriers_dict.keys()))
+      nom_select = st.selectbox(
+          "Sélectionner l'ouvrier", list(ouvriers_dict.keys())
+      )
       date_saisie = st.date_input("Date", value=date.today())
       presence = st.toggle("Présent sur chantier", value=True)
 
@@ -180,30 +194,33 @@ elif onglet == "Saisie du Jour":
           ],
           value="Faible (Très bien)",
       )
-      hse = st.checkbox("Port complet des EPI (Casque, gants, etc.)", value=True)
+      hse = st.checkbox(
+          "Port complet des EPI (Casque, gants, etc.)", value=True
+      )
 
       btn_save = st.form_submit_button("Valider la journée")
       if btn_save:
         score_calc = calculer_score(presence, quantite, qualite, hse)
-        with sqlite3.connect(DB_PATH) as conn:
-          cursor = conn.cursor()
-          cursor.execute(
-              """
-                        INSERT INTO performances (worker_id, date_jour, presence, quantite, unite, qualite_dechet, hse_conforme, score)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-              (
-                  ouvriers_dict[nom_select],
-                  str(date_saisie),
-                  int(presence),
-                  quantite,
-                  unite,
-                  qualite,
-                  int(hse),
-                  score_calc,
-              ),
-          )
-          conn.commit()
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+                    INSERT INTO performances (worker_id, date_jour, presence, quantite, unite, qualite_dechet, hse_conforme, score)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            (
+                ouvriers_dict[nom_select],
+                str(date_saisie),
+                int(presence),
+                quantite,
+                unite,
+                qualite,
+                int(hse),
+                score_calc,
+            ),
+        )
+        conn.commit()
+        conn.close()
         st.success(f"Enregistré ! Score attribué : {score_calc} / 100")
 
 # 3. TABLEAU DE BORD
