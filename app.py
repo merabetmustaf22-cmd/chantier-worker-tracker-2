@@ -12,7 +12,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_direct_v26.db")
+# Chemin fixe de la base SQLite
+DB_PATH = "chantier_gestion_directe_v27.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -97,14 +98,18 @@ EFFECTIF_GLOBAL = [
 ]
 
 
+def get_db_connection():
+  return sqlite3.connect(DB_PATH, timeout=10)
+
+
 def init_database():
-  conn = sqlite3.connect(DB_PATH)
+  conn = get_db_connection()
   c = conn.cursor()
   c.execute("""
         CREATE TABLE IF NOT EXISTS workers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nom TEXT NOT NULL UNIQUE,
-            chantier_fixe TEXT NOT NULL DEFAULT 'EN ATTENTE / DEPOT'
+            chantier_fixe TEXT NOT NULL DEFAULT 'CAC-31-24'
         )
     """)
   c.execute("""
@@ -126,7 +131,7 @@ def init_database():
   for w in EFFECTIF_GLOBAL:
     c.execute(
         "INSERT OR IGNORE INTO workers (nom, chantier_fixe) VALUES (?, ?)",
-        (w, "EN ATTENTE / DEPOT"),
+        (w, "CAC-31-24"),
     )
   conn.commit()
   conn.close()
@@ -136,7 +141,8 @@ init_database()
 
 
 def get_workers_df():
-  conn = sqlite3.connect(DB_PATH)
+  # Lecture directe à chaque appel sans mise en cache
+  conn = get_db_connection()
   df = pd.read_sql_query(
       "SELECT id, nom, chantier_fixe FROM workers ORDER BY nom ASC", conn
   )
@@ -162,7 +168,7 @@ menu_general = st.radio(
 )
 
 # ==============================================================================
-# 1. ESPACE TERRAIN : SAISIE DU JOUR
+# 1. ESPACE TERRAIN : SAISIE DU JOUR (SYNCHRONISATION EN DIRECT)
 # ==============================================================================
 if menu_general == "⚡ Saisie du Jour (Chantier)":
   st.subheader("Pointage & Rendement Journalier")
@@ -170,22 +176,27 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
   col_ch, col_dt = st.columns(2)
   with col_ch:
     chantier_choisi = st.selectbox(
-        "📍 Chantier", [c for c in LISTE_CHANTIERS if c != "EN ATTENTE / DEPOT"]
+        "📍 Chantier",
+        [c for c in LISTE_CHANTIERS if c != "EN ATTENTE / DEPOT"],
+        key="select_chantier_saisie",
     )
   with col_dt:
     date_choisie = st.date_input("📅 Date", value=date.today())
 
+  # Lecture fraîche directe depuis la base
   df_w = get_workers_df()
   equipe_active = df_w[df_w["chantier_fixe"] == chantier_choisi]
 
   st.markdown(
-      f"#### 👷 Équipe affectée au site ({len(equipe_active)} ouvrier(s))"
+      f"#### 👷 Équipe affectée à **{chantier_choisi}** ({len(equipe_active)}"
+      " ouvrier(s))"
   )
 
   if equipe_active.empty:
     st.warning(
-        f"Aucun ouvrier n'est affecté à {chantier_choisi}. Rendez-vous dans le"
-        " Panneau d'Administration pour affecter votre équipe."
+        f"Aucun ouvrier n'est actuellement affecté au chantier"
+        f" {chantier_choisi}.\n\nAllez dans le **Panneau d'Administration** pour"
+        " composer l'équipe de ce chantier."
     )
   else:
     donnees_ouvriers = {}
@@ -225,6 +236,7 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
       apprec_val = "-"
       obs_val = ""
 
+      # Si l'ouvrier est présent ou en demi-journée
       if "Présent" in st_val or "1/2" in st_val:
         col_t1, col_t2 = st.columns(2)
         with col_t1:
@@ -244,6 +256,7 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
               key=f"typ_{w_id}",
           )
 
+        # Si métrage : afficher le champ numérique
         if type_travail == "Métrage (m² / ml)":
           col_r1, col_r2, col_r3 = st.columns([1.5, 1.5, 2])
           with col_r1:
@@ -271,6 +284,7 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
                 placeholder="Ex: terrasse sud, relevés...",
                 key=f"obs_{w_id}",
             )
+        # Si Bricolage : masquer le champ métrage
         else:
           unite_val = "Sans métrage"
           qte_val = 1.0
@@ -291,6 +305,7 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
                 placeholder="Ex: réparation solin, regard, finitions...",
                 key=f"obs_br_{w_id}",
             )
+      # Si absent : tout le bloc production disparaît
       else:
         obs_val = st.text_input(
             "Motif / Observation de l'absence",
@@ -314,7 +329,7 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
         type="primary",
         use_container_width=True,
     ):
-      conn = sqlite3.connect(DB_PATH)
+      conn = get_db_connection()
       c = conn.cursor()
 
       for w_id, d in donnees_ouvriers.items():
@@ -374,7 +389,7 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
       )
 
 # ==============================================================================
-# 2. ESPACE ADMINISTRATION (LA MAIN TOTALE SUR LES AFFECTATIONS)
+# 2. PANNEAU D'ADMINISTRATION
 # ==============================================================================
 elif menu_general == "🔐 Panneau d'Administration":
   st.subheader("Accès Sécurisé Administration")
@@ -408,9 +423,9 @@ elif menu_general == "🔐 Panneau d'Administration":
     sous_menu_admin = st.selectbox(
         "Module Administrateur",
         [
-            "⚡ Composer l'équipe d'un Chantier (Rapide)",
-            "🔄 Modifier l'ouvrier par ouvrier",
-            "📋 Liste globale actuelle",
+            "⚡ Composer l'équipe d'un Chantier (Mise à jour directe)",
+            "🔄 Déplacer un ouvrier individuel",
+            "📋 Liste globale actuelle des chantiers",
             "👤 Profils & Gestion des Photos",
             "📊 Historique des Saisies",
         ],
@@ -418,40 +433,45 @@ elif menu_general == "🔐 Panneau d'Administration":
 
     st.markdown("---")
 
-    # 1. COMPOSITION RAPIDE D'UN CHANTIER
-    if sous_menu_admin == "⚡ Composer l'équipe d'un Chantier (Rapide)":
-      st.markdown("#### Composer l'équipe complète d'un chantier")
+    # 1. COMPOSITION D'ÉQUIPE PAR CHANTIER (ÉCRASE ET TRANSFÈRE DIRECTEMENT)
+    if (
+        sous_menu_admin
+        == "⚡ Composer l'équipe d'un Chantier (Mise à jour directe)"
+    ):
+      st.markdown("#### Composition d'équipe")
       st.caption(
-          "Sélectionnez le chantier et cochez qui y travaille. Les ouvriers"
-          " choisis seront automatiquement retirés de leurs anciens chantiers."
+          "Cochez les ouvriers de ce chantier. Tout ouvrier sélectionné ici"
+          " sera automatiquement retiré de son ancien chantier."
       )
-
-      df_w = get_workers_df()
 
       ch_cible = st.selectbox(
-          "Choisir le Chantier à configurer",
+          "Sélectionner le Chantier à configurer",
           [c for c in LISTE_CHANTIERS if c != "EN ATTENTE / DEPOT"],
+          key="adm_ch_cible",
       )
 
-      # Ouvriers actuellement sur ce chantier
-      actuels = df_w[df_w["chantier_fixe"] == ch_cible]["nom"].tolist()
+      # Relecture fraîche directe
+      df_w_admin = get_workers_df()
+      actuels = df_w_admin[df_w_admin["chantier_fixe"] == ch_cible][
+          "nom"
+      ].tolist()
 
       nouveaux_membres = st.multiselect(
-          f"Ouvriers affectés à {ch_cible}",
+          f"Ouvriers travaillant sur {ch_cible} :",
           options=EFFECTIF_GLOBAL,
           default=actuels,
-          placeholder="Cochez les ouvriers pour ce chantier...",
+          key=f"ms_{ch_cible}",
       )
 
       if st.button(
-          f"💾 Enregistrer l'équipe de {ch_cible}",
+          f"💾 Valider et synchroniser l'équipe de {ch_cible}",
           type="primary",
           use_container_width=True,
       ):
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
-        # 1. Retirer les ouvriers qui étaient ici mais ne sont plus cochés (vers EN ATTENTE)
+        # 1. Les anciens qui ont été décochés vont dans le dépôt d'attente
         for nom in actuels:
           if nom not in nouveaux_membres:
             c.execute(
@@ -460,7 +480,7 @@ elif menu_general == "🔐 Panneau d'Administration":
                 (nom,),
             )
 
-        # 2. Affecter tous les sélectionnés à ce chantier (les retire auto des autres)
+        # 2. Les cochés sont affectés à ce chantier (ce qui les retire automatiquement de partout ailleurs)
         for nom in nouveaux_membres:
           c.execute(
               "UPDATE workers SET chantier_fixe = ? WHERE nom = ?",
@@ -469,37 +489,41 @@ elif menu_general == "🔐 Panneau d'Administration":
 
         conn.commit()
         conn.close()
+
         st.success(
-            f"✅ Équipe enregistrée ! {len(nouveaux_membres)} ouvrier(s)"
+            f"✅ Synchronisation réussie ! {len(nouveaux_membres)} ouvrier(s)"
             f" affecté(s) à {ch_cible}."
         )
         st.rerun()
 
-    # 2. MODIFIER UN OUVRIER PAR OUVRIER
-    elif sous_menu_admin == "🔄 Modifier l'ouvrier par ouvrier":
-      st.markdown("#### Déplacer un ouvrier spécifique")
-      df_w = get_workers_df()
+    # 2. DÉPLACEMENT OUVRIER PAR OUVRIER
+    elif sous_menu_admin == "🔄 Déplacer un ouvrier individuel":
+      st.markdown("#### Déplacer un ouvrier vers un autre chantier")
+      df_w_admin = get_workers_df()
 
       ouvrier_sel = st.selectbox(
-          "Choisir l'ouvrier", df_w["nom"].tolist(), key="ouv_sel_direct"
+          "Sélectionner l'ouvrier",
+          df_w_admin["nom"].tolist(),
+          key="ouv_transf_sel",
       )
-      ligne_ouvrier = df_w[df_w["nom"] == ouvrier_sel].iloc[0]
-      actuel_ch = ligne_ouvrier["chantier_fixe"]
-      ouv_id = int(ligne_ouvrier["id"])
+      infos_o = df_w_admin[df_w_admin["nom"] == ouvrier_sel].iloc[0]
+      ancien_ch = infos_o["chantier_fixe"]
+      ouv_id = int(infos_o["id"])
 
-      st.info(f"Chantier actuel de **{ouvrier_sel}** : **{actuel_ch}**")
+      st.info(f"Chantier actuel de **{ouvrier_sel}** : **{ancien_ch}**")
 
       dest_ch = st.selectbox(
-          "Transférer vers le chantier",
-          [c for c in LISTE_CHANTIERS if c != actuel_ch],
+          "Nouveau chantier d'affectation",
+          [c for c in LISTE_CHANTIERS if c != ancien_ch],
+          key="dest_ch_sel",
       )
 
       if st.button(
-          f"Confirmer le transfert vers {dest_ch}",
+          f"Transférer {ouvrier_sel} vers {dest_ch}",
           type="primary",
           use_container_width=True,
       ):
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute(
             "UPDATE workers SET chantier_fixe = ? WHERE id = ?",
@@ -507,21 +531,23 @@ elif menu_general == "🔐 Panneau d'Administration":
         )
         conn.commit()
         conn.close()
-        st.success(f"{ouvrier_sel} est maintenant affecté à {dest_ch} !")
+        st.success(f"✅ {ouvrier_sel} transféré vers {dest_ch} avec succès !")
         st.rerun()
 
     # 3. LISTE GLOBALE
-    elif sous_menu_admin == "📋 Liste globale actuelle":
-      st.markdown("#### Répartition générale des effectifs")
-      df_w = get_workers_df()
+    elif (
+        sous_menu_admin == "📋 Liste globale actuelle des chantiers"
+    ):
+      st.markdown("#### Répartition actuelle de tout l'effectif")
+      df_w_admin = get_workers_df()
 
       filtre = st.selectbox(
           "Filtrer par Chantier", ["Tous les chantiers"] + LISTE_CHANTIERS
       )
       if filtre != "Tous les chantiers":
-        df_show = df_w[df_w["chantier_fixe"] == filtre]
+        df_show = df_w_admin[df_w_admin["chantier_fixe"] == filtre]
       else:
-        df_show = df_w
+        df_show = df_w_admin
 
       st.dataframe(
           df_show[["nom", "chantier_fixe"]].rename(
@@ -536,9 +562,9 @@ elif menu_general == "🔐 Panneau d'Administration":
 
     # 4. PHOTOS
     elif sous_menu_admin == "👤 Profils & Gestion des Photos":
-      st.markdown("#### Gestion des Portraits des Ouvriers")
+      st.markdown("#### Portraits des ouvriers")
       ouvrier_photo = st.selectbox(
-          "Sélectionner l'ouvrier", EFFECTIF_GLOBAL, key="sel_ouv_photo"
+          "Sélectionner l'ouvrier", EFFECTIF_GLOBAL, key="sel_ouv_photo_adm"
       )
       photo_actuelle = get_photo_path(ouvrier_photo)
 
@@ -553,7 +579,7 @@ elif menu_general == "🔐 Panneau d'Administration":
         fichier_photo = st.file_uploader(
             "Télécharger une photo (Galerie ou Fichier)",
             type=["jpg", "jpeg", "png"],
-            key="upload_worker_photo_adm",
+            key="upload_worker_photo_box",
         )
         if fichier_photo is not None:
           image_obj = Image.open(fichier_photo)
@@ -566,8 +592,8 @@ elif menu_general == "🔐 Panneau d'Administration":
 
     # 5. HISTORIQUE
     elif sous_menu_admin == "📊 Historique des Saisies":
-      st.markdown("#### Registre des Pointages")
-      conn = sqlite3.connect(DB_PATH)
+      st.markdown("#### Registre des Pointages & Rendements")
+      conn = get_db_connection()
       query = """
             SELECT 
                 p.date_jour AS Date,
