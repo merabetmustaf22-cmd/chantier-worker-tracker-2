@@ -5,13 +5,13 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="Suivi Chantier & Évaluation",
+    page_title="Suivi de Chantier & Étanchéité",
     page_icon="🏗️",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_eval_v14.db")
+DB_PATH = os.path.join("/tmp", "chantier_gestion_etancheite.db")
 
 LISTE_CHANTIERS = [
     "CAC-31-24",
@@ -138,13 +138,13 @@ def get_workers_df():
   return df
 
 
-# --- INTERFACE ---
-st.title("🏗️ Suivi Chantier Étanchéité")
+# --- INTERFACE PRINCIPALE ---
+st.title("🏗️ Suivi de Chantier & Étanchéité")
 menu = st.radio(
-    "Menu",
+    "Navigation",
     [
         "⚡ Saisie Chantier",
-        "⚙️ Équipes Fixes",
+        "⚙️ Affectations Fixes",
         "📊 Historique & Synthèse",
     ],
     horizontal=True,
@@ -152,7 +152,7 @@ menu = st.radio(
 
 # 1. SAISIE DU CHANTIER
 if menu == "⚡ Saisie Chantier":
-  st.subheader("Pointage, Tâches & Évaluation")
+  st.subheader("Pointage, Tâches & Évaluation Journalière")
 
   col_ch, col_dt = st.columns(2)
   with col_ch:
@@ -163,12 +163,12 @@ if menu == "⚡ Saisie Chantier":
   df_w = get_workers_df()
   fixes = df_w[df_w["chantier_fixe"] == chantier_choisi]
 
-  st.markdown(f"#### 👷 Équipe affectée ({len(fixes)} ouvriers)")
+  st.markdown(f"#### 👷 Équipe affectée au site ({len(fixes)} ouvriers)")
 
   if fixes.empty:
     st.warning(
-        f"Makach ouvriers rattachés l {chantier_choisi}. Roh l l'onglet '⚙️"
-        " Équipes Fixes'."
+        f"Aucun ouvrier rattaché au chantier {chantier_choisi}. Veuillez"
+        " configurer l'équipe dans l'onglet '⚙️ Affectations Fixes'."
     )
   else:
     with st.form("form_pointage_individuel", clear_on_submit=False):
@@ -188,7 +188,7 @@ if menu == "⚡ Saisie Chantier":
                   "Présent (Journée)",
                   "1/2 journée",
                   "Absence Autorisée (Congé/Maladie)",
-                  "Absence Non Autorisée (Ghayab)",
+                  "Absence Non Autorisée (Injustifiée)",
               ],
               key=f"st_{w_id}",
               label_visibility="collapsed",
@@ -204,7 +204,7 @@ if menu == "⚡ Saisie Chantier":
 
         with c_rend:
           type_travail = st.selectbox(
-              f"Type {w_nom}",
+              f"Type de travail {w_nom}",
               ["Métrage (m² / ml)", "Bricol / Sans métrage"],
               key=f"type_{w_id}",
               label_visibility="collapsed",
@@ -231,18 +231,18 @@ if menu == "⚡ Saisie Chantier":
               qte_val = 1.0
           with sub_c2:
             apprec_val = st.selectbox(
-                f"Khdmtou ({w_nom})",
+                f"Qualité d'exécution ({w_nom})",
                 [
-                    "🟢 Mlih bzzaf",
-                    "🟡 Moyen",
-                    "🔴 Na9es (3ayan)",
+                    "🟢 Conforme / Soigné",
+                    "🟡 Moyen / Acceptable",
+                    "🔴 Non conforme / À reprendre",
                 ],
                 key=f"app_{w_id}",
             )
           with sub_c3:
             obs_val = st.text_input(
-                f"Remarque ({w_nom})",
-                placeholder="Ex: terrasse, finitions, regard...",
+                f"Observation ({w_nom})",
+                placeholder="Ex: relevés, acrotères, détails techniques...",
                 key=f"obs_{w_id}",
             )
 
@@ -275,7 +275,7 @@ if menu == "⚡ Saisie Chantier":
           unite = d["unite"]
           app = d["appreciation"]
 
-          # Calcul score souple
+          # Calcul du score technique
           if "Présent" in st_val:
             base_p = 40.0
             pts_prod = (
@@ -285,8 +285,12 @@ if menu == "⚡ Saisie Chantier":
             )
             pts_app = (
                 20.0
-                if "Mlih" in app
-                else (10.0 if "Moyen" in app else (0.0 if "Na9es" in app else 10.0))
+                if "Conforme" in app
+                else (
+                    10.0
+                    if "Moyen" in app
+                    else (0.0 if "Non conforme" in app else 10.0)
+                )
             )
             score = min(base_p + pts_prod + pts_app, 100.0)
           elif "1/2" in st_val:
@@ -317,11 +321,18 @@ if menu == "⚡ Saisie Chantier":
 
         conn.commit()
         conn.close()
-        st.success(f"Journée validée pour {chantier_choisi} !")
+        st.success(
+            f"Pointage validé avec succès pour le chantier {chantier_choisi} !"
+        )
 
 # 2. DEFINITION DES EQUIPES FIXES
-elif menu == "⚙️ Équipes Fixes":
-  st.subheader("Affectation Fixe des Ouvriers")
+elif menu == "⚙️ Affectations Fixes":
+  st.subheader("Affectation Fixe des Ouvriers par Chantier")
+  st.caption(
+      "Définissez l'affectation standard de chaque ouvrier afin d'afficher"
+      " automatiquement l'équipe correspondante lors de la saisie."
+  )
+
   df_w = get_workers_df()
 
   with st.form("form_maj_fixes"):
@@ -337,7 +348,7 @@ elif menu == "⚙️ Équipes Fixes":
             else 0
         )
         nouvelles_affectations[row["id"]] = st.selectbox(
-            f"Chantier de {row['nom']}",
+            f"Chantier fixe de {row['nom']}",
             LISTE_CHANTIERS,
             index=idx,
             key=f"ch_fix_{row['id']}",
@@ -345,7 +356,7 @@ elif menu == "⚙️ Équipes Fixes":
         )
 
     btn_sauvegarder = st.form_submit_button(
-        "💾 Sauvegarder les affectations",
+        "💾 Enregistrer les affectations",
         type="primary",
         use_container_width=True,
     )
@@ -359,12 +370,12 @@ elif menu == "⚙️ Équipes Fixes":
         )
       conn.commit()
       conn.close()
-      st.success("Affectations enregistrées !")
+      st.success("Affectations fixes enregistrées avec succès !")
       st.rerun()
 
 # 3. HISTORIQUE & SYNTHESE
 elif menu == "📊 Historique & Synthèse":
-  st.subheader("Historique des Saisies & Évaluation")
+  st.subheader("Historique des Saisies & Évaluations")
   conn = sqlite3.connect(DB_PATH)
   query = """
         SELECT 
@@ -374,12 +385,12 @@ elif menu == "📊 Historique & Synthèse":
             p.statut AS Statut,
             p.tache AS Tâche,
             CASE 
-                WHEN p.unite = 'Sans métrage' THEN 'Bricol'
+                WHEN p.unite = 'Sans métrage' THEN 'Bricol / Forfait'
                 WHEN p.quantite > 0 THEN p.quantite || ' ' || p.unite 
                 ELSE '-'
             END AS Production,
-            COALESCE(p.appreciation, '-') AS [Avis Khdma],
-            COALESCE(p.observation, '-') AS Remarque,
+            COALESCE(p.appreciation, '-') AS [Qualité / Appréciation],
+            COALESCE(p.observation, '-') AS Observation,
             CASE 
                 WHEN p.score IS NULL THEN 'Justifié'
                 ELSE CAST(p.score AS TEXT)
@@ -392,12 +403,12 @@ elif menu == "📊 Historique & Synthèse":
   conn.close()
 
   if df_hist.empty:
-    st.info("Aucune donnée enregistrée.")
+    st.info("Aucune donnée enregistrée pour le moment.")
   else:
     st.dataframe(df_hist, use_container_width=True, hide_index=True)
     csv = df_hist.to_csv(index=False).encode("utf-8")
     st.download_button(
-        "📥 Exporter (CSV)",
+        "📥 Exporter les données (CSV)",
         data=csv,
         file_name="suivi_chantier_etancheite.csv",
         mime="text/csv",
