@@ -5,13 +5,13 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="Pointage Étanchéité",
-    page_icon="🏗️️",
+    page_title="Suivi Chantier & Tâches",
+    page_icon="🏗️",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_fixe_v12.db")
+DB_PATH = os.path.join("/tmp", "chantier_taches_v13.db")
 
 LISTE_CHANTIERS = [
     "CAC-31-24",
@@ -28,6 +28,40 @@ LISTE_CHANTIERS = [
     "VILLA Hasnaoui MAKAM",
     "VILLA Hasnaoui Outhman",
     "ESC-16-24",
+]
+
+LISTE_TACHES = [
+    "PAX",
+    "PARE-VAPEUR",
+    "SOKLE PARE-VAPEUR",
+    "ELASTOTEK",
+    "ELASTOTEK GOURGE",
+    "ELASTOTEK JOINTAGE",
+    "ELASTOTEK LEVI",
+    "ELASTOTEK NETTOYAGE",
+    "Forme de pente",
+    "GOURGE",
+    "JOINT DE DILATATION",
+    "MASTIC",
+    "nettoyage",
+    "PONSAGE",
+    "décapage",
+    "BACHE A EAU",
+    "PISCINE",
+    "SOUS CARRELAGE",
+    "TEST EAU",
+    "coupe-feu",
+    "Couvre-joint",
+    "DALLE Cheminée",
+    "regard",
+    "Traitement de l'ascenseur",
+    "BRICOL",
+    "BRICOL ELASTOTEK",
+    "BRICOL SILICONE",
+    "BRICOL SOKLE",
+    "BRICOL SOUS CARRELAGE",
+    "BRICOL PARE-VAPEUR",
+    "DIVERS",
 ]
 
 EFFECTIF_GLOBAL = [
@@ -56,35 +90,10 @@ EFFECTIF_GLOBAL = [
     "TAHAR BOUZIAN YOUCEF",
 ]
 
-LISTE_TACHES = [
-    "PAX",
-    "PARE-VAPEUR",
-    "SOKLE PARE-VAPEUR",
-    "ELASTOTEK",
-    "ELASTOTEK GOURGE",
-    "ELASTOTEK JOINTAGE",
-    "ELASTOTEK LEVI",
-    "ELASTOTEK NETTOYAGE",
-    "Forme de pente",
-    "GOURGE",
-    "JOINT DE DILATATION",
-    "MASTIC",
-    "nettoyage",
-    "PONSAGE",
-    "BRICOL",
-    "BRICOL ELASTOTEK",
-    "BRICOL SILICONE",
-    "BRICOL SOKLE",
-    "BRICOL SOUS CARRELAGE",
-    "BRICOL PARE-VAPEUR",
-    "DIVERS",
-]
-
 
 def init_database():
   conn = sqlite3.connect(DB_PATH)
   c = conn.cursor()
-  # Table ouvriers avec leur chantier d'affectation fixe par défaut
   c.execute("""
         CREATE TABLE IF NOT EXISTS workers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,20 +138,20 @@ def get_workers_df():
 
 
 # --- APPLICATION ---
-st.title("🏗️️ Suivi Chantier Étanchéité")
+st.title("🏗️ Suivi Chantier Étanchéité")
 menu = st.radio(
     "Menu",
     [
-        "⚡ Pointage Chantier",
+        "⚡ Saisie Chantier",
         "⚙️ Équipes Fixes",
         "📊 Historique & Synthèse",
     ],
     horizontal=True,
 )
 
-# 1. POINTAGE RAPIDE DU CHANTIER
-if menu == "⚡ Pointage Chantier":
-  st.subheader("Pointage par Chantier")
+# 1. SAISIE DU CHANTIER (TÂCHE ET MÉTRAGE INDIVIDUELS)
+if menu == "⚡ Saisie Chantier":
+  st.subheader("Pointage & Tâches par Ouvrier")
 
   col_ch, col_dt = st.columns(2)
   with col_ch:
@@ -151,84 +160,112 @@ if menu == "⚡ Pointage Chantier":
     date_choisie = st.date_input("📅 Date", value=date.today())
 
   df_w = get_workers_df()
-  # Ouvriers fixes sur ce chantier
   fixes = df_w[df_w["chantier_fixe"] == chantier_choisi]
 
-  st.markdown(
-      f"#### 👷 Équipe fixe habituelle ({len(fixes)} ouvrier(s))"
-  )
+  st.markdown(f"#### 👷 Équipe affectée ({len(fixes)} ouvriers)")
 
   if fixes.empty:
     st.warning(
-        f"Aucun ouvrier n'est affecté en fixe sur {chantier_choisi}. Rendez-vous"
-        " dans l'onglet '⚙️ Équipes Fixes' pour définir l'équipe."
+        f"Aucun ouvrier n'est rattaché à {chantier_choisi}. Définissez"
+        " l'équipe dans l'onglet '⚙️ Équipes Fixes'."
     )
   else:
-    with st.form("form_pointage_rapide", clear_on_submit=False):
-      etats = {}
+    with st.form("form_pointage_individuel", clear_on_submit=False):
+      donnees_ouvriers = {}
+
       for _, row in fixes.iterrows():
-        c_nom, c_statut = st.columns([1.2, 2])
-        with c_nom:
-          st.write(f"**{row['nom']}**")
-        with c_statut:
-          etats[row["id"]] = st.selectbox(
-              f"Statut {row['nom']}",
+        w_id = row["id"]
+        w_nom = row["nom"]
+
+        st.markdown(f"**👷 {w_nom}**")
+        c_st, c_tch, c_rend = st.columns([1.2, 1.5, 1.5])
+
+        with c_st:
+          st_val = st.selectbox(
+              f"Statut {w_nom}",
               [
                   "Présent (Journée)",
                   "1/2 journée",
                   "Absence Autorisée (Congé/Maladie)",
                   "Absence Non Autorisée (Ghayab)",
               ],
-              key=f"st_{row['id']}",
+              key=f"st_{w_id}",
               label_visibility="collapsed",
           )
 
-      st.markdown("---")
-      st.markdown("##### 🛠️ Travail réalisé sur le chantier")
-      tache = st.selectbox("Tâche principale", LISTE_TACHES)
-
-      est_bricol = "BRICOL" in tache.upper() or tache in [
-          "DIVERS",
-          "nettoyage",
-          "PONSAGE",
-      ]
-      sans_metrage = st.checkbox(
-          "🔨 Bricol / Travail sans métrage", value=est_bricol
-      )
-
-      if not sans_metrage:
-        cm1, cm2 = st.columns(2)
-        with cm1:
-          qte = st.number_input(
-              "Métrage par ouvrier présent",
-              min_value=0.0,
-              step=1.0,
-              value=25.0,
+        with c_tch:
+          # Si absent, pas besoin de tâche
+          tache_val = st.selectbox(
+              f"Tâche {w_nom}",
+              LISTE_TACHES,
+              key=f"tch_{w_id}",
+              label_visibility="collapsed",
           )
-        with cm2:
-          unite = st.selectbox("Unité", ["m²", "ml", "Unité"])
-      else:
-        qte = 1.0
-        unite = "Sans métrage"
 
-      obs = st.text_input(
-        "📝 Remarque (terrasse, acrotère, finitions, etc.)",
-        placeholder="Optionnel"
-      )
+        with c_rend:
+          type_travail = st.selectbox(
+              f"Type {w_nom}",
+              ["Métrage (m² / ml)", "Bricol / Sans métrage"],
+              key=f"type_{w_id}",
+              label_visibility="collapsed",
+          )
 
-      valider = st.form_submit_button(
-          "💾 Valider le Pointage du Chantier",
+        # Si l'ouvrier est présent et a du métrage
+        qte_val = 0.0
+        unite_val = "m²"
+        obs_val = ""
+
+        if "Présent" in st_val or "1/2" in st_val:
+          sub_c1, sub_c2 = st.columns([2, 2])
+          with sub_c1:
+            if type_travail == "Métrage (m² / ml)":
+              qte_val = st.number_input(
+                  f"Quantité ({w_nom})",
+                  min_value=0.0,
+                  step=1.0,
+                  value=25.0,
+                  key=f"qte_{w_id}",
+              )
+            else:
+              unite_val = "Sans métrage"
+              qte_val = 1.0
+          with sub_c2:
+            obs_val = st.text_input(
+                f"Remarque / Zone ({w_nom})",
+                placeholder="Ex: acrotère, regard, terrasse...",
+                key=f"obs_{w_id}",
+            )
+
+        st.markdown("<hr style='margin:5px 0;'>", unsafe_allow_html=True)
+
+        donnees_ouvriers[w_id] = {
+            "statut": st_val,
+            "tache": (
+                tache_val if ("Présent" in st_val or "1/2" in st_val) else "-"
+            ),
+            "quantite": qte_val,
+            "unite": unite_val,
+            "observation": obs_val,
+        }
+
+      btn_valider = st.form_submit_button(
+          "💾 Valider la journée de l'équipe",
           type="primary",
           use_container_width=True,
       )
 
-      if valider:
+      if btn_valider:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
-        for w_id, st_val in etats.items():
+        for w_id, d in donnees_ouvriers.items():
+          st_val = d["statut"]
+          qte = d["quantite"]
+          unite = d["unite"]
+
+          # Calcul du score
           if "Présent" in st_val:
-            pts = 80.0 if sans_metrage or qte >= 25 else 55.0
+            pts = 80.0 if (unite == "Sans métrage" or qte >= 25) else 50.0
           elif "1/2" in st_val:
             pts = 40.0
           elif "Autorisée" in st_val:
@@ -246,24 +283,26 @@ if menu == "⚡ Pointage Chantier":
                   chantier_choisi,
                   w_id,
                   st_val,
-                  tache,
-                  qte if "Présent" in st_val else 0.0,
+                  d["tache"],
+                  qte,
                   unite,
-                  obs,
+                  d["observation"],
                   pts,
               ),
           )
 
         conn.commit()
         conn.close()
-        st.success(f"Pointage validé avec succès pour {chantier_choisi} !")
+        st.success(
+            f"Pointage et tâches validés avec succès pour {chantier_choisi} !"
+        )
 
 # 2. DEFINITION DES EQUIPES FIXES
 elif menu == "⚙️ Équipes Fixes":
   st.subheader("Affectation Fixe des Ouvriers")
   st.caption(
-      "Définissez une bonne fois pour toutes sur quel chantier chaque ouvrier"
-      " travaille en fixe."
+      "Affectez chaque ouvrier à son chantier régulier pour qu'il apparaisse"
+      " directement."
   )
 
   df_w = get_workers_df()
@@ -318,7 +357,7 @@ elif menu == "📊 Historique & Synthèse":
             p.statut AS Statut,
             p.tache AS Tâche,
             CASE 
-                WHEN p.unite = 'Sans métrage' THEN 'Bricol'
+                WHEN p.unite = 'Sans métrage' THEN 'Bricol / Forfait'
                 WHEN p.quantite > 0 THEN p.quantite || ' ' || p.unite 
                 ELSE '-'
             END AS Production,
