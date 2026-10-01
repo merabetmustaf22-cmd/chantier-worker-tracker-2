@@ -7,6 +7,11 @@ import pandas as pd
 from PIL import Image
 import streamlit as st
 
+# Moteur de formatage Excel avancé
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
 st.set_page_config(
     page_title="Suivi de Chantier & Étanchéité",
     page_icon="🏗️",
@@ -14,7 +19,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Base de données permanente
 DB_PATH = "chantier_master.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
@@ -207,6 +211,87 @@ def get_photo_path(identifiant):
         if os.path.exists(p):
             return p
     return None
+
+def generer_fichier_excel_pro(df_data, titre_rapport="RAPPORT JOURNALIER D'ACTIVITÉ & ÉTANCHÉITÉ"):
+    """Génère un classeur Excel stylisé avec en-têtes d'entreprise, bordures et largeurs automatiques."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Suivi Chantier"
+    ws.views.sheetView[0].showGridLines = True
+
+    # 1. En-tête officiel
+    ws.merge_cells("A1:J1")
+    titre_cell = ws["A1"]
+    titre_cell.value = titre_rapport
+    titre_cell.font = Font(name="Calibri", size=15, bold=True, color="FFFFFF")
+    titre_cell.fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
+    titre_cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 40
+
+    # 2. Métadonnées du rapport
+    ws["A2"] = f"Date d'exportation : {datetime.now().strftime('%d/%m/%Y à %H:%M')}"
+    ws["A2"].font = Font(name="Calibri", size=10, italic=True, color="555555")
+    ws["J2"] = f"Total entrées : {len(df_data)}"
+    ws["J2"].font = Font(name="Calibri", size=10, bold=True, color="1F497D")
+    ws["J2"].alignment = Alignment(horizontal="right")
+    ws.row_dimensions[2].height = 20
+
+    # 3. Ligne d'en-tête du tableau
+    headers = list(df_data.columns)
+    ws.append(headers)
+    header_row_idx = 3
+    ws.row_dimensions[header_row_idx].height = 28
+
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="244062", end_color="244062", fill_type="solid")
+    thin_border = Border(
+        left=Side(style='thin', color='D9D9D9'),
+        right=Side(style='thin', color='D9D9D9'),
+        top=Side(style='thin', color='D9D9D9'),
+        bottom=Side(style='thin', color='D9D9D9')
+    )
+
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws.cell(row=header_row_idx, column=col_idx)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = thin_border
+
+    # 4. Données avec alternance de lignes
+    zebra_fill = PatternFill(start_color="F2F5F8", end_color="F2F5F8", fill_type="solid")
+    data_font = Font(name="Calibri", size=10)
+
+    for row_idx, row_values in enumerate(df_data.itertuples(index=False), start=4):
+        ws.append(list(row_values))
+        ws.row_dimensions[row_idx].height = 22
+        is_even = (row_idx % 2 == 0)
+
+        for col_idx in range(1, len(headers) + 1):
+            c = ws.cell(row=row_idx, column=col_idx)
+            c.font = data_font
+            c.border = thin_border
+            if is_even:
+                c.fill = zebra_fill
+
+            # Alignements intelligents
+            val_str = str(c.value or "")
+            if col_idx in [1, 5, 8, 10]:  # Date, Statut, Qualité, Score
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_idx == 7:           # Production
+                c.alignment = Alignment(horizontal="right", vertical="center")
+            else:
+                c.alignment = Alignment(horizontal="left", vertical="center")
+
+    # 5. Ajustement automatique de la largeur des colonnes
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue()
 
 # --- NOTIFICATIONS STREAMLIT ---
 if "sync_notif" not in st.session_state:
@@ -416,7 +501,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             st.session_state["admin_active_module"] = None
 
         MODULES_ADMIN = [
-            ("mod_rapport", "📊 Registre & Rapports", "Consulter, corriger ou exporter les rapports de saisie"),
+            ("mod_rapport", "📊 Registre & Rapports", "Consulter, corriger ou exporter les rapports Excel"),
             ("mod_chantiers_taches", "🏗️ Chantiers & Corps d'état", "Ajouter, modifier ou supprimer des chantiers et tâches"),
             ("mod_profils", "👥 Profils & Photos", "Gérer les noms et photos des Conducteurs et Ouvriers"),
             ("mod_chantiers_cond", "👷 Chantiers / Conducteurs", "Attribuer les chantiers sous la responsabilité de chacun"),
@@ -465,11 +550,11 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             st.markdown("---")
 
-            # 1. MODULE REGISTRE & RAPPORTS AVEC EXPORT EXCEL PARFAIT
+            # 1. MODULE REGISTRE & RAPPORTS
             if mod_actuel == "mod_rapport":
                 st.markdown("### 📊 Registre & Gestion des Saisies Conducteurs")
                 
-                tab_reg, tab_corr = st.tabs(["📋 Registre & Consultation", "✏️️ Corriger un Pointage (Admin)"])
+                tab_reg, tab_corr = st.tabs(["📋 Registre & Exportation Excel", "✏️ Corriger un Pointage (Admin)"])
 
                 conn = get_db_connection()
                 query_admin = """
@@ -517,36 +602,35 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             axis=1
                         )
                         colonnes_vues = ["Date", "Chantier", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Observation", "Score"]
-                        
-                        st.markdown(f"**Nombre d'enregistrements :** `{len(df_affichage)}` ligne(s)")
-                        st.dataframe(df_affichage[colonnes_vues], use_container_width=True, hide_index=True)
+                        df_final_export = df_affichage[colonnes_vues]
 
-                        # EXPORT ULTRA COMPATIBLE EXCEL (Point-virgule et UTF-8 BOM)
-                        csv_propre = df_affichage[colonnes_vues].to_csv(index=False, sep=";", encoding="utf-8-sig")
+                        st.markdown(f"**Lignes filtrées :** `{len(df_final_export)}` enregistrement(s)")
+                        st.dataframe(df_final_export, use_container_width=True, hide_index=True)
 
+                        st.markdown("#### 📥 Téléchargements Officiels")
                         col_dl1, col_dl2 = st.columns(2)
+
+                        # Génération du fichier Excel Pro
+                        excel_pro_bytes = generer_fichier_excel_pro(df_final_export)
                         with col_dl1:
                             st.download_button(
-                                "📥 Télécharger CSV (Excel Français)",
+                                "📗 Télécharger le Rapport Excel (.xlsx)",
+                                data=excel_pro_bytes,
+                                file_name=f"rapport_travaux_{date.today()}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+
+                        # Génération CSV Pro (Point-virgule et UTF-8 BOM)
+                        csv_propre = df_final_export.to_csv(index=False, sep=";", encoding="utf-8-sig")
+                        with col_dl2:
+                            st.download_button(
+                                "📥 Télécharger en CSV (Séparateur ;)",
                                 data=csv_propre.encode("utf-8-sig"),
-                                file_name=f"rapport_pointage_{date.today()}.csv",
+                                file_name=f"rapport_travaux_{date.today()}.csv",
                                 mime="text/csv",
                                 use_container_width=True
                             )
-                        with col_dl2:
-                            try:
-                                buffer = io.BytesIO()
-                                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                                    df_affichage[colonnes_vues].to_excel(writer, index=False, sheet_name="Pointages")
-                                st.download_button(
-                                    "📗 Télécharger Fichier Excel (.xlsx)",
-                                    data=buffer.getvalue(),
-                                    file_name=f"rapport_pointage_{date.today()}.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    use_container_width=True
-                                )
-                            except Exception:
-                                st.caption("💡 Pour activer l'export natif .xlsx : installez `openpyxl` (`pip install openpyxl`).")
 
                 with tab_corr:
                     st.markdown("##### Rectifier ou supprimer une saisie erronée")
@@ -854,7 +938,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             chantiers_options = get_all_chantiers()
                             chantier_init = st.selectbox("Chantier initial :", chantiers_options, key="sel_new_worker_ch_tab")
                         with col_add2:
-                            photo_nouvel_ouvrier = st.file_uploader("Photo (Optionnel) :", type=["jpg", "jpeg", "png"], key=upload_new_worker_photo_tab)
+                            photo_nouvel_ouvrier = st.file_uploader("Photo (Optionnel) :", type=["jpg", "jpeg", "png"], key="upload_new_worker_photo_tab")
 
                         if st.button("➕ Ajouter l'ouvrier", type="primary", key="btn_add_worker_tab"):
                             nom_nettoye = nom_nouveau.strip()
