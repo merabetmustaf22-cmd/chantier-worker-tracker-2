@@ -1,260 +1,208 @@
-import sqlite3
 from datetime import date
+import sqlite3
 import pandas as pd
 import streamlit as st
 
-# Configuration de la page
+# Configuration responsive adaptée aux smartphones
 st.set_page_config(
-    page_title="Système de Scoring Ouvriers", page_icon="👷", layout="wide"
+    page_title="Suivi Chantier & Ouvriers",
+    page_icon="🏗️",
+    layout="centered",
+    initial_sidebar_state="collapsed",
 )
 
-# Connexion à la base de données SQLite
+# --- BASE DE DONNÉES SQLITE ---
 conn = sqlite3.connect("chantier_tracker.db", check_same_thread=False)
-c = conn.cursor()
+cursor = conn.cursor()
 
-# Création des tables nécessaires
-c.execute("""
+cursor.execute("""
 CREATE TABLE IF NOT EXISTS workers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nom_prenom TEXT NOT NULL,
-    poste TEXT NOT NULL,
-    actif INTEGER DEFAULT 1
+    nom TEXT NOT NULL,
+    fonction TEXT NOT NULL
 )
 """)
 
-c.execute("""
-CREATE TABLE IF NOT EXISTS daily_attendance (
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS performances (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     worker_id INTEGER,
-    date TEXT,
-    statut TEXT,
-    heures_sup REAL DEFAULT 0
-)
-""")
-
-c.execute("""
-CREATE TABLE IF NOT EXISTS daily_productivity (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    worker_id INTEGER,
-    date TEXT,
-    qte_realisee REAL,
-    qte_cible REAL
-)
-""")
-
-c.execute("""
-CREATE TABLE IF NOT EXISTS penalties (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    worker_id INTEGER,
-    date TEXT,
-    type_incident TEXT,
-    points_retires INTEGER,
-    remarque TEXT
+    date_jour TEXT,
+    presence INTEGER,
+    quantite REAL,
+    unite TEXT,
+    qualite_dechet TEXT,
+    hse_conforme INTEGER,
+    score REAL,
+    FOREIGN KEY(worker_id) REFERENCES workers(id)
 )
 """)
 conn.commit()
 
-# Données d'exemple initiales
-c.execute("SELECT COUNT(*) FROM workers")
-if c.fetchone()[0] == 0:
-    workers_init = [
-        ("Mohamed Benali", "Applicateur"),
-        ("Karim Mansouri", "Chef d'équipe"),
-        ("Youcef Belkacem", "Manoeuvre"),
-        ("Ahmed Zitouni", "Applicateur"),
-    ]
-    c.executemany(
-        "INSERT INTO workers (nom_prenom, poste) VALUES (?, ?)", workers_init
-    )
-    conn.commit()
 
-# Menu latéral
-st.sidebar.title("👷 Suivi de Chantier")
-menu = st.sidebar.radio(
-    "Menu Principal",
-    [
-        "📊 Dashboard Responsable (Score & Primes)",
-        "🕒 Pointage de Présence",
-        "📐 Saisie de Rendement",
-        "⚠️️ Enregistrement des Pénalités",
-    ],
+# --- CALCUL DU SCORE (0 à 100) ---
+def calculer_score(presence, quantite, qualite, hse):
+  if not presence:
+    return 0.0
+
+  score = 30.0  # Présence validée (30 pts)
+
+  # Productivité (max 40 pts)
+  if quantite >= 40.0:
+    score += 40.0
+  elif quantite >= 25.0:
+    score += 30.0
+  elif quantite > 0.0:
+    score += 15.0
+
+  # Qualité / Déchets (max 15 pts)
+  if qualite == "Faible (Très bien)":
+    score += 15.0
+  elif qualite == "Moyen (Acceptable)":
+    score += 10.0
+  else:
+    score += 0.0
+
+  # Respect HSE / EPI (max 15 pts)
+  if hse:
+    score += 15.0
+
+  return min(score, 100.0)
+
+
+# --- INTERFACE UTILISATEUR ---
+st.title("🏗️ Suivi Chantier")
+onglet = st.radio(
+    "Navigation",
+    ["Saisie du Jour", "Tableau de Bord", "Gestion Ouvriers"],
+    horizontal=True,
 )
 
-# Récupération des ouvriers actifs
-df_workers = pd.read_sql_query(
-    "SELECT id, nom_prenom, poste FROM workers WHERE actif = 1", conn
-)
-workers_dict = dict(zip(df_workers["id"], df_workers["nom_prenom"]))
-
-# ==========================================
-# 1. Dashboard Responsable
-# ==========================================
-if menu == "📊 Dashboard Responsable (Score & Primes)":
-    st.title("📊 Évaluation des Ouvriers et Calcul du Score")
-    st.write(
-        "Tableau de bord pour le calcul automatique des scores et le classement des ouvriers."
+# 1. GESTION DES OUVRIERS
+if onglet == "Gestion Ouvriers":
+  st.subheader("Ajouter un ouvrier")
+  with st.form("form_worker", clear_on_submit=True):
+    nom = st.text_input("Nom & Prénom")
+    fonction = st.selectbox(
+        "Fonction / Spécialité",
+        [
+            "Applicateur Étanchéité",
+            "Manoeuvre",
+            "Chef d'équipe",
+            "Maçon",
+            "Ferrailleur",
+        ],
     )
+    btn_ajouter = st.form_submit_button("Enregistrer")
+    if btn_ajouter and nom:
+      cursor.execute(
+          "INSERT INTO workers (nom, fonction) VALUES (?, ?)", (nom, fonction)
+      )
+      conn.commit()
+      st.success(f"Ouvrier {nom} ajouté avec succès !")
 
-    scores = []
-    for _, w in df_workers.iterrows():
-        w_id = w["id"]
-        score_base = 100
+  st.divider()
+  st.subheader("Liste de l'équipe")
+  df_workers = pd.read_sql_query(
+      "SELECT id, nom, fonction FROM workers", conn
+  )
+  st.dataframe(df_workers, use_container_width=True, hide_index=True)
 
-        # Données de présence
-        df_att = pd.read_sql_query(
-            f"SELECT statut, heures_sup FROM daily_attendance WHERE worker_id = {w_id}",
-            conn,
-        )
-        retards = len(df_att[df_att["statut"] == "Retard"])
-        absences = len(df_att[df_att["statut"] == "Absent"])
-        heures_sup = df_att["heures_sup"].sum() if not df_att.empty else 0
+# 2. SAISIE JOURNALIÈRE
+elif onglet == "Saisie du Jour":
+  st.subheader("Pointage & Rendement")
+  df_workers = pd.read_sql_query("SELECT id, nom FROM workers", conn)
 
-        # Données de rendement
-        df_prod = pd.read_sql_query(
-            f"SELECT qte_realisee, qte_cible FROM daily_productivity WHERE worker_id = {w_id}",
-            conn,
-        )
-        total_realise = (
-            df_prod["qte_realisee"].sum() if not df_prod.empty else 0
-        )
-        total_cible = df_prod["qte_cible"].sum() if not df_prod.empty else 0
-
-        bonus_prod = 0
-        rendement_pct = 100.0
-        if total_cible > 0:
-            rendement_pct = round((total_realise / total_cible) * 100, 1)
-            if rendement_pct > 100:
-                bonus_prod = int((rendement_pct - 100) / 10) * 2
-
-        # Données des pénalités
-        df_pen = pd.read_sql_query(
-            f"SELECT points_retires FROM penalties WHERE worker_id = {w_id}",
-            conn,
-        )
-        total_penalties = (
-            df_pen["points_retires"].sum() if not df_pen.empty else 0
-        )
-
-        # Calcul final
-        final_score = (
-            score_base
-            + (heures_sup * 1)
-            + bonus_prod
-            - (retards * 2)
-            - (absences * 10)
-            - total_penalties
-        )
-
-        if final_score >= 95:
-            categorie = "⭐ Catégorie A+ (Prime max / Promotion)"
-        elif final_score >= 80:
-            categorie = "✅ Catégorie A (Prime standard)"
-        elif final_score >= 60:
-            categorie = "⚠️ Catégorie B (Moyen / Pas de prime)"
-        else:
-            categorie = "❌ Catégorie C (Faible / Recadrage requis)"
-
-        scores.append({
-            "Nom & Prénom": w["nom_prenom"],
-            "Poste": w["poste"],
-            "Rendement (%)": f"{rendement_pct}%",
-            "Heures Sup": heures_sup,
-            "Retards": retards,
-            "Absences": absences,
-            "Score Final": max(0, final_score),
-            "Statut Suggéré": categorie,
-        })
-
-    df_result = pd.DataFrame(scores).sort_values(
-        by="Score Final", ascending=False
+  if df_workers.empty:
+    st.warning(
+        "Veuillez d'abord ajouter des ouvriers dans l'onglet 'Gestion"
+        " Ouvriers'."
     )
-    st.dataframe(df_result, use_container_width=True)
+  else:
+    ouvriers_dict = dict(zip(df_workers["nom"], df_workers["id"]))
+    with st.form("form_perf", clear_on_submit=True):
+      nom_select = st.selectbox("Sélectionner l'ouvrier", list(ouvriers_dict.keys()))
+      date_saisie = st.date_input("Date", value=date.today())
+      presence = st.toggle("Présent sur chantier", value=True)
 
-# ==========================================
-# 2. Pointage de Présence
-# ==========================================
-elif menu == "🕒 Pointage de Présence":
-    st.subheader("🕒 Saisie du Pointage")
-    jour = st.date_input("Date", date.today())
-
-    with st.form("form_pointage"):
-        selected_worker = st.selectbox(
-            "Ouvrier",
-            options=list(workers_dict.keys()),
-            format_func=lambda x: workers_dict[x],
+      col1, col2 = st.columns(2)
+      with col1:
+        quantite = st.number_input(
+            "Production réalisée", min_value=0.0, step=1.0, value=25.0
         )
-        statut = st.radio(
-            "Statut", ["Présent", "Retard", "Absent"], horizontal=True
+      with col2:
+        unite = st.selectbox("Unité", ["m²", "ml", "Unité"])
+
+      qualite = st.select_slider(
+          "Niveau de chutes / déchets",
+          options=[
+              "Élevé (Mauvais)",
+              "Moyen (Acceptable)",
+              "Faible (Très bien)",
+          ],
+          value="Faible (Très bien)",
+      )
+      hse = st.checkbox("Port complet des EPI (Casque, gants, etc.)", value=True)
+
+      btn_save = st.form_submit_button("Valider la journée")
+      if btn_save:
+        score_final = calculer_score(presence, quantite, qualite, hse)
+        cursor.execute(
+            """
+            INSERT INTO performances (worker_id, date_jour, presence, quantite, unite, qualite_dechet, hse_conforme, score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                ouvriers_dict[nom_select],
+                str(date_saisie),
+                int(presence),
+                quantite,
+                unite,
+                qualite,
+                int(hse),
+                score_final,
+            ),
         )
-        h_sup = st.number_input(
-            "Heures supplémentaires", min_value=0.0, max_value=8.0, step=0.5
-        )
+        conn.commit()
+        st.success(f"Enregistré ! Score attribué : {score_final} / 100")
 
-        if st.form_submit_button("Enregistrer"):
-            c.execute(
-                "INSERT INTO daily_attendance (worker_id, date, statut, heures_sup) VALUES (?, ?, ?, ?)",
-                (selected_worker, str(jour), statut, h_sup),
-            )
-            conn.commit()
-            st.success("Pointage enregistré !")
+# 3. TABLEAU DE BORD
+elif onglet == "Tableau de Bord":
+  st.subheader("Performances de l'équipe")
+  query = """
+    SELECT 
+        p.date_jour AS Date,
+        w.nom AS Ouvrier,
+        w.fonction AS Fonction,
+        p.quantite || ' ' || p.unite AS Rendement,
+        p.qualite_dechet AS Qualite,
+        p.score AS Score
+    FROM performances p
+    JOIN workers w ON p.worker_id = w.id
+    ORDER BY p.id DESC
+  """
+  df_result = pd.read_sql_query(query, conn)
 
-# ==========================================
-# 3. Saisie de Rendement
-# ==========================================
-elif menu == "📐 Saisie de Rendement":
-    st.subheader("📐 Saisie du Rendement Quotidien")
-    jour = st.date_input("Date", date.today())
+  if df_result.empty:
+    st.info("Aucune donnée enregistrée pour le moment.")
+  else:
+    col1, col2 = st.columns(2)
+    with col1:
+      st.metric(
+          label="Score Moyen Équipe",
+          value=f"{round(df_result['Score'].mean(), 1)} / 100",
+      )
+    with col2:
+      st.metric(label="Total Saisies", value=len(df_result))
 
-    with st.form("form_prod"):
-        selected_worker = st.selectbox(
-            "Ouvrier",
-            options=list(workers_dict.keys()),
-            format_func=lambda x: workers_dict[x],
-        )
-        col1, col2 = st.columns(2)
-        with col1:
-            qte_realisee = st.number_input(
-                "Quantité réalisée (ex: m²)", min_value=0.0, step=5.0
-            )
-        with col2:
-            qte_cible = st.number_input(
-                "Objectif cible (ex: m²)", min_value=1.0, value=80.0, step=5.0
-            )
+    st.dataframe(df_result, use_container_width=True, hide_index=True)
 
-        if st.form_submit_button("Enregistrer"):
-            c.execute(
-                "INSERT INTO daily_productivity (worker_id, date, qte_realisee, qte_cible) VALUES (?, ?, ?, ?)",
-                (selected_worker, str(jour), qte_realisee, qte_cible),
-            )
-            conn.commit()
-            st.success("Rendement enregistré !")
-
-# ==========================================
-# 4. Enregistrement des Pénalités
-# ==========================================
-elif menu == "⚠️ Enregistrement des Pénalités":
-    st.subheader("⚠️ Signalement des Fautes et Infractions")
-    jour = st.date_input("Date", date.today())
-
-    with st.form("form_penalties"):
-        selected_worker = st.selectbox(
-            "Ouvrier",
-            options=list(workers_dict.keys()),
-            format_func=lambda x: workers_dict[x],
-        )
-        type_incident = st.selectbox("Type d'infraction", [
-            "Manque d'équipement de sécurité (Casque, gilet...)",
-            "Malfaçon nécessitant reprise",
-            "Gaspillage de matière première",
-            "Départ avant l'heure sans autorisation",
-        ])
-        pts = st.slider("Points à retirer", min_value=1, max_value=20, value=5)
-        remarque = st.text_area("Remarque / Détails")
-
-        if st.form_submit_button("Appliquer la sanction"):
-            c.execute(
-                "INSERT INTO penalties (worker_id, date, type_incident, points_retires, remarque) VALUES (?, ?, ?, ?, ?)",
-                (selected_worker, str(jour), type_incident, pts, remarque),
-            )
-            conn.commit()
-            st.warning(f"{pts} points retirés avec succès.")
+    # Export Excel / CSV pour les rapports
+    csv = df_result.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "📥 Exporter les données (CSV)",
+        data=csv,
+        file_name="suivi_rendement_ouvriers.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
