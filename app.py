@@ -7,12 +7,12 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Suivi de Chantier & Étanchéité",
-    page_icon="🏗️",
+    page_icon="🏗️️",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_roles_v29.db"
+DB_PATH = "chantier_roles_v30.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -158,7 +158,7 @@ def get_photo_path(nom_ouvrier):
   return None
 
 
-# --- GESTION NOTIFICATIONS PERSISTANTES ---
+# --- GESTIÓN DE NOTIFICACIONES ---
 if "sync_notif" not in st.session_state:
   st.session_state["sync_notif"] = None
 
@@ -166,37 +166,40 @@ if st.session_state["sync_notif"]:
   st.success(st.session_state["sync_notif"])
 
 st.title("🏗️ Suivi de Chantier & Étanchéité")
+
 menu_general = st.radio(
     "Espace de travail",
-    ["👷 Espace Conducteur (Pointage)", "🔐 Espace Admin (Affectation & Gestion)"],
+    [
+        "👷 Espace Conducteur 1",
+        "👷 Espace Conducteur 2",
+        "🔐 Espace Admin (Direction)",
+    ],
     horizontal=True,
 )
 
-# ==============================================================================
-# 1. ESPACE CONDUCTEUR DE TRAVAUX (SÉLECTION RAPIDE DE 2 OUVRIERS)
-# ==============================================================================
-if menu_general == "👷 Espace Conducteur (Pointage)":
-  st.subheader("Pointage Journalier par le Conducteur")
 
-  c_cond, c_dt = st.columns(2)
-  with c_cond:
-    conducteur_nom = st.text_input(
-        "Conducteur / Chef de site",
-        value=st.session_state.get("conducteur_memo", ""),
-        placeholder="Votre nom...",
+def interface_saisie_conducteur(conducteur_id_tag, default_nom):
+  st.subheader(f"Pointage Journalier — {default_nom}")
+
+  col_cond, col_dt = st.columns(2)
+  with col_cond:
+    nom_conducteur = st.text_input(
+        "Nom du Conducteur / Responsable",
+        value=st.session_state.get(f"memo_{conducteur_id_tag}", default_nom),
+        key=f"nom_cond_{conducteur_id_tag}",
     )
-    if conducteur_nom:
-      st.session_state["conducteur_memo"] = conducteur_nom
-  with c_dt:
-    date_choisie = st.date_input("📅 Date", value=date.today())
+    st.session_state[f"memo_{conducteur_id_tag}"] = nom_conducteur
+  with col_dt:
+    date_choisie = st.date_input(
+        "📅 Date", value=date.today(), key=f"date_{conducteur_id_tag}"
+    )
 
   chantier_choisi = st.selectbox(
       "📍 Sélectionner le Chantier",
       [c for c in LISTE_CHANTIERS if c != "EN ATTENTE / DEPOT"],
-      key="select_chantier_conducteur",
+      key=f"ch_sel_{conducteur_id_tag}",
   )
 
-  # Récupération des ouvriers affectés par l'Admin pour ce chantier
   df_w = get_workers_df()
   equipe_fixee_admin = df_w[df_w["chantier_fixe"] == chantier_choisi][
       "nom"
@@ -204,27 +207,23 @@ if menu_general == "👷 Espace Conducteur (Pointage)":
 
   if not equipe_fixee_admin:
     st.warning(
-        f"⚠️ Aucun ouvrier n'est rattaché à {chantier_choisi} par"
-        " l'administrateur. Veuillez contacter l'administration."
+        f"⚠️ Aucun ouvrier n'est actuellement rattaché à {chantier_choisi} par"
+        " l'administrateur."
     )
   else:
-    # Le conducteur sélectionne exactement les 2 ouvriers qu'il contrôle aujourd'hui
-    default_selection = (
+    default_sel = (
         equipe_fixee_admin[:2]
         if len(equipe_fixee_admin) >= 2
         else equipe_fixee_admin
     )
-    ouvriers_selectionnes = st.multiselect(
+    ouvriers_choisis = st.multiselect(
         "👥 Ouvriers sous contrôle aujourd'hui (sélectionnez les 2 ouvriers) :",
         options=equipe_fixee_admin,
-        default=default_selection,
-        help=(
-            "L'Admin a affecté cette équipe. Cochez précisément les 2 ouvriers"
-            " présents avec vous."
-        ),
+        default=default_sel,
+        key=f"ms_ouv_{conducteur_id_tag}",
     )
 
-    df_actifs = df_w[df_w["nom"].isin(ouvriers_selectionnes)]
+    df_actifs = df_w[df_w["nom"].isin(ouvriers_choisis)]
 
     if df_actifs.empty:
       st.info("Veuillez sélectionner au moins un ouvrier pour le pointage.")
@@ -260,7 +259,7 @@ if menu_general == "👷 Espace Conducteur (Pointage)":
                 "Absence Autorisée (Congé/Maladie)",
                 "Absence Non Autorisée (Injustifiée)",
             ],
-            key=f"st_{w_id}",
+            key=f"st_{conducteur_id_tag}_{w_id}",
         )
 
         tache_val = "-"
@@ -269,12 +268,13 @@ if menu_general == "👷 Espace Conducteur (Pointage)":
         apprec_val = "-"
         obs_val = ""
 
-        # Ouvrier présent ou en demi-journée
         if "Présent" in st_val or "1/2" in st_val:
           col_t1, col_t2 = st.columns(2)
           with col_t1:
             tache_val = st.selectbox(
-                "Tâche effectuée", LISTE_TACHES, key=f"tch_{w_id}"
+                "Tâche effectuée",
+                LISTE_TACHES,
+                key=f"tch_{conducteur_id_tag}_{w_id}",
             )
           with col_t2:
             est_bricol_defaut = "BRICOL" in tache_val.upper() or tache_val in [
@@ -286,7 +286,7 @@ if menu_general == "👷 Espace Conducteur (Pointage)":
                 "Type d'activité",
                 ["Métrage (m² / ml)", "Bricol / Sans métrage"],
                 index=1 if est_bricol_defaut else 0,
-                key=f"typ_{w_id}",
+                key=f"typ_{conducteur_id_tag}_{w_id}",
             )
 
           if type_travail == "Métrage (m² / ml)":
@@ -297,24 +297,24 @@ if menu_general == "👷 Espace Conducteur (Pointage)":
                   min_value=0.0,
                   step=1.0,
                   value=25.0,
-                  key=f"qte_{w_id}",
+                  key=f"qte_{conducteur_id_tag}_{w_id}",
               )
               unite_val = "m²"
             with col_r2:
               apprec_val = st.selectbox(
-                "Qualité d'exécution",
-                [
-                    "🟢 Conforme / Soigné",
-                    "🟡 Moyen / Acceptable",
-                    "🔴 Non conforme / À reprendre",
-                ],
-                key=f"app_{w_id}",
-            )
+                  "Qualité d'exécution",
+                  [
+                      "🟢 Conforme / Soigné",
+                      "🟡 Moyen / Acceptable",
+                      "🔴 Non conforme / À reprendre",
+                  ],
+                  key=f"app_{conducteur_id_tag}_{w_id}",
+              )
             with col_r3:
               obs_val = st.text_input(
                   "Observation",
                   placeholder="Ex: terrasse sud, relevés...",
-                  key=f"obs_{w_id}",
+                  key=f"obs_{conducteur_id_tag}_{w_id}",
               )
           else:
             unite_val = "Sans métrage"
@@ -328,19 +328,19 @@ if menu_general == "👷 Espace Conducteur (Pointage)":
                       "🟡 Moyen / Acceptable",
                       "🔴 Non conforme / À reprendre",
                   ],
-                  key=f"app_br_{w_id}",
+                  key=f"app_br_{conducteur_id_tag}_{w_id}",
               )
             with col_b2:
               obs_val = st.text_input(
                   "Détail du bricolage",
-                  placeholder="Ex: traitement relevé, solin...",
-                  key=f"obs_br_{w_id}",
+                  placeholder="Ex: traitement regard, solin...",
+                  key=f"obs_br_{conducteur_id_tag}_{w_id}",
               )
         else:
           obs_val = st.text_input(
               "Motif de l'absence",
               placeholder="Ex: arrêt maladie, congé...",
-              key=f"obs_abs_{w_id}",
+              key=f"obs_abs_{conducteur_id_tag}_{w_id}",
           )
 
         st.markdown("---")
@@ -358,6 +358,7 @@ if menu_general == "👷 Espace Conducteur (Pointage)":
           "💾 Valider le pointage des ouvriers",
           type="primary",
           use_container_width=True,
+          key=f"btn_val_{conducteur_id_tag}",
       ):
         conn = get_db_connection()
         c = conn.cursor()
@@ -400,7 +401,7 @@ if menu_general == "👷 Espace Conducteur (Pointage)":
               (
                   str(date_choisie),
                   chantier_choisi,
-                  conducteur_nom if conducteur_nom else "Non spécifié",
+                  nom_conducteur if nom_conducteur else default_nom,
                   w_id,
                   st_val,
                   d["tache"],
@@ -417,15 +418,25 @@ if menu_general == "👷 Espace Conducteur (Pointage)":
 
         heure_validation = datetime.now().strftime("%H:%M:%S")
         st.session_state["sync_notif"] = (
-            f"✅ Pointage validé à {heure_validation} pour {chantier_choisi}"
-            f" ({len(donnees_ouvriers)} ouvrier(s)) !"
+            f"✅ Pointage validé par {nom_conducteur} à {heure_validation} pour"
+            f" {chantier_choisi} ({len(donnees_ouvriers)} ouvrier(s)) !"
         )
         st.rerun()
 
+
 # ==============================================================================
-# 2. ESPACE ADMIN (FIXE LES ÉQUIPES ET GÈRE LES OUVRIERS)
+# 1. ESPACIOS DE CONDUCTORES 1 Y 2
 # ==============================================================================
-elif menu_general == "🔐 Espace Admin (Affectation & Gestion)":
+if menu_general == "👷 Espace Conducteur 1":
+  interface_saisie_conducteur("c1", "Conducteur 1")
+
+elif menu_general == "👷 Espace Conducteur 2":
+  interface_saisie_conducteur("c2", "Conducteur 2")
+
+# ==============================================================================
+# 2. ESPACIO ADMIN (DIRECCIÓN / GESTIÓN GLOBAL)
+# ==============================================================================
+elif menu_general == "🔐 Espace Admin (Direction)":
   st.subheader("Accès Sécurisé - Administration")
 
   if "admin_logged_in" not in st.session_state:
@@ -467,12 +478,11 @@ elif menu_general == "🔐 Espace Admin (Affectation & Gestion)":
 
     st.markdown("---")
 
-    # 1. L'ADMIN FIXE L'ÉQUIPE DU CHANTIER
     if sous_menu_admin == "⚡ Fixer l'équipe d'un Chantier":
       st.markdown("#### Définir l'équipe autorisée sur un chantier")
       st.caption(
-          "L'administrateur fixe les ouvriers qui seront visibles pour le"
-          " conducteur. Tout ouvrier coché ici est retiré de son ancien site."
+          "L'administrateur fixe les ouvriers qui seront visibles pour les 2"
+          " conducteurs. Tout ouvrier coché ici est retiré de son ancien site."
       )
 
       ch_cible = st.selectbox(
@@ -525,7 +535,6 @@ elif menu_general == "🔐 Espace Admin (Affectation & Gestion)":
         )
         st.rerun()
 
-    # 2. DÉPLACEMENT INDIVIDUEL
     elif sous_menu_admin == "🔄 Transférer un ouvrier individuel":
       st.markdown("#### Déplacer un ouvrier vers un autre chantier")
       df_w_admin = get_workers_df()
@@ -566,7 +575,6 @@ elif menu_general == "🔐 Espace Admin (Affectation & Gestion)":
         )
         st.rerun()
 
-    # 3. VUE GÉNÉRALE
     elif sous_menu_admin == "📋 Vue générale des équipes":
       st.markdown("#### Répartition actuelle des ouvriers")
       df_w_admin = get_workers_df()
@@ -587,7 +595,6 @@ elif menu_general == "🔐 Espace Admin (Affectation & Gestion)":
           hide_index=True,
       )
 
-    # 4. PHOTOS
     elif sous_menu_admin == "👤 Profils & Gestion des Photos":
       st.markdown("#### Portraits des ouvriers")
       ouvrier_photo = st.selectbox(
@@ -619,7 +626,6 @@ elif menu_general == "🔐 Espace Admin (Affectation & Gestion)":
           )
           st.rerun()
 
-    # 5. HISTORIQUE
     elif (
         sous_menu_admin
         == "📊 Historique des Pointages (avec Conducteur)"
