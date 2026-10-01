@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_roles_v33.db"
+DB_PATH = "chantier_roles_v34.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -119,13 +119,12 @@ def init_database():
             UNIQUE(conducteur_tag, chantier)
         )
     """)
-  # Clé unique stricte : impossible d'avoir des doublons pour la même date, chantier et ouvrier
   c.execute("""
         CREATE TABLE IF NOT EXISTS pointages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date_jour TEXT NOT NULL,
             chantier TEXT NOT NULL,
-            conducteur TEXT,
+            conducteur TEXT NOT NULL DEFAULT 'Non spécifié',
             worker_id INTEGER NOT NULL,
             statut TEXT,
             tache TEXT,
@@ -193,7 +192,7 @@ def get_photo_path(nom_ouvrier):
   return None
 
 
-# --- GESTION NOTIFICATIONS PERSISTANTES ---
+# --- GESTION NOTIFICATIONS ---
 if "sync_notif" not in st.session_state:
   st.session_state["sync_notif"] = None
 
@@ -219,7 +218,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
   col_cond, col_dt = st.columns(2)
   with col_cond:
     nom_conducteur = st.text_input(
-        "Nom du Conducteur / Responsable",
+        "Nom du Conducteur / Responsable de saisie",
         value=st.session_state.get(f"memo_{conducteur_id_tag}", default_nom),
         key=f"nom_cond_{conducteur_id_tag}",
     )
@@ -244,15 +243,13 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
       key=f"ch_sel_{conducteur_id_tag}",
   )
 
-  # Vérification en direct de l'état de validation
   date_str = str(date_choisie)
   deja_fait = est_deja_valide(date_str, chantier_choisi)
 
   if deja_fait:
     st.info(
-        f"🟢 **Journée déjà enregistrée pour {chantier_choisi} le {date_str}.**"
-        " Si vous validez à nouveau, les données existantes seront mises à jour"
-        " sans créer de doublon."
+        f"🟢 **Pointage déjà enregistré pour {chantier_choisi} le {date_str}.**"
+        " Une nouvelle validation mettra à jour la saisie sans doublon."
     )
 
   df_w = get_workers_df()
@@ -371,13 +368,13 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
           with col_b2:
             obs_val = st.text_input(
                 "Détail du bricolage",
-                placeholder="Ex: traitement relevé, regard...",
+                placeholder="Ex: étanchéité regard, solin...",
                 key=f"obs_br_{conducteur_id_tag}_{w_id}",
             )
       else:
         obs_val = st.text_input(
             "Motif de l'absence",
-            placeholder="Ex: arrêt maladie, congé...",
+            placeholder="Ex: congé, maladie, arrêt...",
             key=f"obs_abs_{conducteur_id_tag}_{w_id}",
         )
 
@@ -393,7 +390,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
       }
 
     label_bouton = (
-        "🔄 Mettre à jour la journée (Déjà enregistrée)"
+        "🔄 Mettre à jour la saisie (Déjà validée)"
         if deja_fait
         else "💾 Valider la journée de l'équipe"
     )
@@ -406,6 +403,8 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     ):
       conn = get_db_connection()
       c = conn.cursor()
+
+      nom_final_conducteur = nom_conducteur.strip() if nom_conducteur else default_nom
 
       for w_id, d in donnees_ouvriers.items():
         st_val = d["statut"]
@@ -437,7 +436,6 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
         else:
           score = 0.0
 
-        # INSERT OR REPLACE : Empêche strictement les doublons et met à jour si déjà présent
         c.execute(
             """
                 INSERT OR REPLACE INTO pointages (date_jour, chantier, conducteur, worker_id, statut, tache, quantite, unite, appreciation, observation, score)
@@ -446,7 +444,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             (
                 date_str,
                 chantier_choisi,
-                nom_conducteur if nom_conducteur else default_nom,
+                nom_final_conducteur,
                 w_id,
                 st_val,
                 d["tache"],
@@ -463,9 +461,8 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 
       heure_validation = datetime.now().strftime("%H:%M:%S")
       st.session_state["sync_notif"] = (
-          f"✅ Journée validée sans doublon par {nom_conducteur} à"
-          f" {heure_validation} pour {chantier_choisi} ({len(donnees_ouvriers)}"
-          " ouvrier(s)) !"
+          f"✅ Journée enregistrée par {nom_final_conducteur} à"
+          f" {heure_validation} pour {chantier_choisi} !"
       )
       st.rerun()
 
@@ -480,7 +477,7 @@ elif menu_general == "👷 Espace Conducteur 2":
   interface_saisie_conducteur("c2", "Conducteur 2")
 
 # ==============================================================================
-# 2. ESPACE ADMIN (GESTION EXCLUSIVE DES CHANTIERS ET DES ÉQUIPES)
+# 2. ESPACE ADMIN (GESTION & REGISTRE AVEC CONDUCTEUR)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
   st.subheader("Accès Sécurisé - Administration")
@@ -514,23 +511,100 @@ elif menu_general == "🔐 Espace Admin (Direction)":
     sous_menu_admin = st.selectbox(
         "Module Administrateur",
         [
+            "📊 Registre & Rapport des Pointages (Par Conducteur)",
             "🏗️ Affecter les Chantiers aux Conducteurs",
             "⚡ Fixer l'équipe d'un Chantier",
             "🔄 Transférer un ouvrier individuel",
             "📋 Vue générale des équipes",
             "👤 Profils & Gestion des Photos",
-            "📊 Historique des Pointages (Sans Doublons)",
         ],
     )
 
     st.markdown("---")
 
-    # MODULE 1 : ATTRIBUTION DES CHANTIERS AUX CONDUCTEURS
-    if sous_menu_admin == "🏗️ Affecter les Chantiers aux Conducteurs":
+    # MODULE RAPPORT & REGISTRE (CONDUCTEUR EN EVIDENCE)
+    if (
+        sous_menu_admin
+        == "📊 Registre & Rapport des Pointages (Par Conducteur)"
+    ):
+      st.markdown("#### Registre des Pointages & Responsables de Saisie")
+      conn = get_db_connection()
+      query = """
+            SELECT 
+                p.date_jour AS [Date],
+                p.chantier AS [Chantier],
+                p.conducteur AS [Conducteur (Auteur Saisie)],
+                w.nom AS [Ouvrier],
+                p.statut AS [Statut],
+                p.tache AS [Tâche],
+                CASE 
+                    WHEN p.unite = 'Sans métrage' THEN 'Bricol'
+                    WHEN p.quantite > 0 THEN p.quantite || ' ' || p.unite 
+                    ELSE '-'
+                END AS [Production],
+                COALESCE(p.appreciation, '-') AS [Qualité],
+                COALESCE(p.observation, '-') AS [Observation],
+                CASE 
+                    WHEN p.score IS NULL THEN 'Justifié'
+                    ELSE CAST(p.score AS TEXT)
+                END AS [Score]
+            FROM pointages p
+            JOIN workers w ON p.worker_id = w.id
+            ORDER BY p.date_jour DESC, p.chantier ASC, w.nom ASC
+        """
+      df_hist = pd.read_sql_query(query, conn)
+      conn.close()
+
+      if df_hist.empty:
+        st.info("Aucune saisie enregistrée dans la base de données.")
+      else:
+        # Filtres interactifs pour affiner le rapport
+        c_f1, c_f2 = st.columns(2)
+        with c_f1:
+          conducteurs_trouves = sorted(
+              df_hist["Conducteur (Auteur Saisie)"].dropna().unique().tolist()
+          )
+          filtre_cond = st.selectbox(
+              "Filtrer par Conducteur :",
+              ["Tous les conducteurs"] + conducteurs_trouves,
+          )
+        with c_f2:
+          chantiers_trouves = sorted(
+              df_hist["Chantier"].dropna().unique().tolist()
+          )
+          filtre_ch = st.selectbox(
+              "Filtrer par Chantier :",
+              ["Tous les chantiers"] + chantiers_trouves,
+          )
+
+        df_filtre = df_hist.copy()
+        if filtre_cond != "Tous les conducteurs":
+          df_filtre = df_filtre[
+              df_filtre["Conducteur (Auteur Saisie)"] == filtre_cond
+          ]
+        if filtre_ch != "Tous les chantiers":
+          df_filtre = df_filtre[df_filtre["Chantier"] == filtre_ch]
+
+        st.markdown(
+            f"**Total enregistrements affichés :** `{len(df_filtre)}` ligne(s)"
+        )
+        st.dataframe(df_filtre, use_container_width=True, hide_index=True)
+
+        csv = df_filtre.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Télécharger ce rapport (CSV Excel)",
+            data=csv,
+            file_name=f"rapport_pointage_{date.today()}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+    # MODULE ATTRIBUTION DES CHANTIERS
+    elif sous_menu_admin == "🏗️ Affecter les Chantiers aux Conducteurs":
       st.markdown("#### Attribution des chantiers sous responsabilité")
       st.caption(
-          "Sélectionnez les chantiers dont chaque conducteur est responsable."
-          " Le conducteur ne verra que les chantiers cochés ici."
+          "L'administrateur définit quels chantiers apparaissent pour chaque"
+          " conducteur."
       )
 
       chantiers_disponibles = [
@@ -538,12 +612,11 @@ elif menu_general == "🔐 Espace Admin (Direction)":
       ]
 
       col_c1, col_c2 = st.columns(2)
-
       with col_c1:
         st.markdown("##### 👷 Conducteur 1")
         actuels_c1 = get_chantiers_conducteur("c1")
         nouveaux_c1 = st.multiselect(
-            "Chantiers sous sa responsabilité :",
+            "Chantiers assignés :",
             options=chantiers_disponibles,
             default=actuels_c1,
             key="ms_admin_assign_c1",
@@ -553,14 +626,14 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         st.markdown("##### 👷 Conducteur 2")
         actuels_c2 = get_chantiers_conducteur("c2")
         nouveaux_c2 = st.multiselect(
-            "Chantiers sous sa responsabilité :",
+            "Chantiers assignés :",
             options=chantiers_disponibles,
             default=actuels_c2,
             key="ms_admin_assign_c2",
         )
 
       if st.button(
-          "💾 Sauvegarder les attributions des conducteurs",
+          "💾 Sauvegarder les attributions",
           type="primary",
           use_container_width=True,
       ):
@@ -598,7 +671,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         )
         st.rerun()
 
-    # MODULE 2 : COMPOSITION DE L'ÉQUIPE FIXE D'UN CHANTIER
+    # MODULE FIXER EQUIPE CHANTIER
     elif sous_menu_admin == "⚡ Fixer l'équipe d'un Chantier":
       st.markdown("#### Définir l'équipe autorisée sur un chantier")
       ch_cible = st.selectbox(
@@ -651,7 +724,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         )
         st.rerun()
 
-    # MODULE 3 : TRANSFERT INDIVIDUEL
+    # MODULE TRANSFERT INDIVIDUEL
     elif sous_menu_admin == "🔄 Transférer un ouvrier individuel":
       st.markdown("#### Déplacer un ouvrier vers un autre chantier")
       df_w_admin = get_workers_df()
@@ -692,7 +765,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         )
         st.rerun()
 
-    # MODULE 4 : VUE GÉNÉRALE
+    # MODULE VUE GENERALE
     elif sous_menu_admin == "📋 Vue générale des équipes":
       st.markdown("#### Répartition actuelle des ouvriers")
       df_w_admin = get_workers_df()
@@ -713,7 +786,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           hide_index=True,
       )
 
-    # MODULE 5 : PHOTOS
+    # MODULE GESTION DES PHOTOS
     elif sous_menu_admin == "👤 Profils & Gestion des Photos":
       st.markdown("#### Portraits des ouvriers")
       ouvrier_photo = st.selectbox(
@@ -744,49 +817,3 @@ elif menu_general == "🔐 Espace Admin (Direction)":
               f"📸 Photo synchronisée pour {ouvrier_photo} !"
           )
           st.rerun()
-
-    # MODULE 6 : HISTORIQUE PROPRE SANS DOUBLONS
-    elif (
-        sous_menu_admin
-        == "📊 Historique des Pointages (Sans Doublons)"
-    ):
-      st.markdown("#### Registre des Saisies Uniques")
-      conn = get_db_connection()
-      query = """
-            SELECT 
-                p.date_jour AS Date,
-                p.chantier AS Chantier,
-                COALESCE(p.conducteur, '-') AS [Conducteur],
-                w.nom AS Ouvrier,
-                p.statut AS Statut,
-                p.tache AS Tâche,
-                CASE 
-                    WHEN p.unite = 'Sans métrage' THEN 'Bricol'
-                    WHEN p.quantite > 0 THEN p.quantite || ' ' || p.unite 
-                    ELSE '-'
-                END AS [Production],
-                COALESCE(p.appreciation, '-') AS [Qualité],
-                COALESCE(p.observation, '-') AS Observation,
-                CASE 
-                    WHEN p.score IS NULL THEN 'Justifié'
-                    ELSE CAST(p.score AS TEXT)
-                END AS Score
-            FROM pointages p
-            JOIN workers w ON p.worker_id = w.id
-            ORDER BY p.date_jour DESC, p.chantier ASC, w.nom ASC
-        """
-      df_hist = pd.read_sql_query(query, conn)
-      conn.close()
-
-      if df_hist.empty:
-        st.info("Aucune saisie enregistrée.")
-      else:
-        st.dataframe(df_hist, use_container_width=True, hide_index=True)
-        csv = df_hist.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "📥 Exporter le registre sans doublons (CSV)",
-            data=csv,
-            file_name="suivi_chantier_unique.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
