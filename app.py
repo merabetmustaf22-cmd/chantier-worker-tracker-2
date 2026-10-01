@@ -4,7 +4,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-# Configuration de la page
+# Configuration optimisée pour mobile
 st.set_page_config(
     page_title="Suivi Chantier & Pointage",
     page_icon="🏗️",
@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_tracker_v9.db")
+DB_PATH = os.path.join("/tmp", "chantier_tracker_v10.db")
 
 # Vos 14 Chantiers
 LISTE_CHANTIERS = [
@@ -71,7 +71,7 @@ LISTE_CORPS_ETAT = [
     "DIVERS",
 ]
 
-# Effectif de vos 23 ouvriers
+# Vos 23 ouvriers
 EFFECTIF_GLOBAL = [
     "ADDA Abbess",
     "MEKHACHEF DJAMEL",
@@ -96,13 +96,6 @@ EFFECTIF_GLOBAL = [
     "GHRIBI MOHAMED",
     "MESSAOUDI ABDELKRIM",
     "TAHAR BOUZIAN YOUCEF",
-]
-
-OPTIONS_STATUT = [
-    "Présent (Journée)",
-    "1/2 journée",
-    "Absence autorisée (Congé/Maladie)",
-    "Absence non autorisée",
 ]
 
 
@@ -167,7 +160,7 @@ def get_rapports():
             r.corps_etat AS [Corps d'État / Motif],
             CASE 
                 WHEN r.statut LIKE '%Absence autorisée%' THEN 'Excusé'
-                WHEN r.statut LIKE '%Absence non autorisée%' THEN 'Non justifié'
+                WHEN r.statut LIKE '%Injustifiée%' THEN 'Non justifié'
                 WHEN r.unite = 'Sans métrage' THEN 'Bricol / Jour'
                 ELSE r.quantite || ' ' || r.unite 
             END AS Production,
@@ -199,20 +192,20 @@ def get_rapports():
   )
 
 
-# --- INTERFACE ---
+# --- INTERFACE PRINCIPALE ---
 st.title("🏗️ Suivi Chantier Étanchéité")
 onglet = st.radio(
     "Menu",
-    ["📋 Pointage Rapide (Équipe)", "✍️ Rendement / Bricol", "📊 Tableau de Bord"],
+    ["📋 Pointage Rapide", "✍️ Saisie Rendement", "📊 Tableau de Bord"],
     horizontal=True,
 )
 
-# 1. POINTAGE RAPIDE COLLECTIF
-if onglet == "📋 Pointage Rapide (Équipe)":
-  st.subheader("Pointage Collectif Journalier")
+# 1. POINTAGE RAPIDE (100% Mobile Friendly)
+if onglet == "📋 Pointage Rapide":
+  st.subheader("Pointage Rapide de l'Équipe")
   st.caption(
-      "Modifiez le statut ou le motif uniquement pour les absents, puis validez"
-      " en un clic."
+      "Par défaut, tous les 23 ouvriers sont marqués présents. Sélectionnez"
+      " uniquement les exceptions."
   )
 
   col1, col2 = st.columns(2)
@@ -221,34 +214,41 @@ if onglet == "📋 Pointage Rapide (Équipe)":
   with col2:
     date_sel = st.date_input("📅 Date", value=date.today(), key="ptg_dt")
 
-  # Préparation du tableau avec statut 'Présent' par défaut
-  df_base = pd.DataFrame({
-      "Ouvrier": EFFECTIF_GLOBAL,
-      "Statut": ["Présent (Journée)"] * len(EFFECTIF_GLOBAL),
-      "Observation / Motif": [""] * len(EFFECTIF_GLOBAL),
-  })
+  st.markdown("---")
 
-  # Tableau éditable avec listes déroulantes intégrées
-  df_modifie = st.data_editor(
-      df_base,
-      column_config={
-          "Ouvrier": st.column_config.TextColumn("Ouvrier", disabled=True),
-          "Statut": st.column_config.SelectboxColumn(
-              "Statut Présence",
-              options=OPTIONS_STATUT,
-              required=True,
-          ),
-          "Observation / Motif": st.column_config.TextColumn(
-              "Observation / Motif absence",
-              help="Ex: Congé payé, Maladie avec certificat, Retard",
-          ),
-      },
-      hide_index=True,
-      use_container_width=True,
+  # Sélection tactile multipages adaptée aux écrans tactiles
+  absents_autorises = st.multiselect(
+      "🟢 Absences Autorisées (Congé, Maladie, Récupération)",
+      options=EFFECTIF_GLOBAL,
+      placeholder="Sélectionnez les ouvriers autorisés...",
   )
 
+  absents_non_autorises = st.multiselect(
+      "🔴 Absences Non Autorisées (Injustifiées)",
+      options=[w for w in EFFECTIF_GLOBAL if w not in absents_autorises],
+      placeholder="Sélectionnez les absents injustifiés...",
+  )
+
+  demi_journees = st.multiselect(
+      "🟡 Demi-journées (1/2 journée)",
+      options=[
+          w
+          for w in EFFECTIF_GLOBAL
+          if w not in absents_autorises and w not in absents_non_autorises
+      ],
+      placeholder="Sélectionnez ceux qui ont fait 1/2 journée...",
+  )
+
+  obs_pointage = st.text_input(
+      "📝 Remarque générale sur le pointage",
+      placeholder="Ex: mauvais temps, transport retardé, etc.",
+  )
+
+  st.write("")
   if st.button(
-      "💾 Enregistrer le pointage de l'équipe", use_container_width=True
+      "💾 Valider le Pointage de l'Équipe",
+      type="primary",
+      use_container_width=True,
   ):
     df_w = get_workers()
     ouvriers_dict = dict(zip(df_w["nom"], df_w["id"]))
@@ -256,26 +256,34 @@ if onglet == "📋 Pointage Rapide (Équipe)":
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    nb_inseres = 0
-    for _, row in df_modifie.iterrows():
-      nom = row["Ouvrier"]
-      statut = row["Statut"]
-      obs = row["Observation / Motif"]
+    count_p = 0
+    count_aa = 0
+    count_ai = 0
+    count_dj = 0
+
+    for nom in EFFECTIF_GLOBAL:
       w_id = ouvriers_dict[nom]
 
-      # Calcul score & paramètres selon présence
-      if statut == "Absence autorisée (Congé/Maladie)":
-        score = None
+      if nom in absents_autorises:
+        statut = "Absence autorisée / Justifiée"
         corps = "Absence autorisée"
-      elif statut == "Absence non autorisée":
-        score = 0.0
+        score = None
+        count_aa += 1
+      elif nom in absents_non_autorises:
+        statut = "Absence non autorisée (Injustifiée)"
         corps = "Absence injustifiée"
-      elif statut == "1/2 journée":
-        score = 20.0
+        score = 0.0
+        count_ai += 1
+      elif nom in demi_journees:
+        statut = "1/2 journée"
         corps = "1/2 journée"
+        score = 20.0
+        count_dj += 1
       else:
-        score = 40.0
+        statut = "Présent (Travail)"
         corps = "Présent"
+        score = 40.0
+        count_p += 1
 
       c.execute(
           """
@@ -291,23 +299,24 @@ if onglet == "📋 Pointage Rapide (Équipe)":
               corps,
               0.0,
               "-",
-              obs,
+              obs_pointage,
               "-",
               score,
           ),
       )
-      nb_inseres += 1
 
     conn.commit()
     conn.close()
+
     st.success(
-        f"Pointage enregistré avec succès pour les {nb_inseres} ouvriers sur"
-        f" {chantier_sel} !"
+        f"✅ Pointage enregistré sur {chantier_sel} : {count_p} Présents |"
+        f" {count_dj} Demi-journées | {count_aa} Excusés | {count_ai}"
+        " Injustifiés"
     )
 
-# 2. RENDEMENT / BRICOL (Saisie individuelle pour ceux qui ont métré)
-elif onglet == "✍️ Rendement / Bricol":
-  st.subheader("Détail Rendement & Tâches")
+# 2. SAISIE RENDEMENT (Métrage ou Bricol)
+elif onglet == "✍️ Saisie Rendement":
+  st.subheader("Production & Bricols Réalisés")
   df_w = get_workers()
   ouvriers_dict = dict(zip(df_w["nom"], df_w["id"]))
 
@@ -349,17 +358,19 @@ elif onglet == "✍️ Rendement / Bricol":
       quantite = 1.0
 
     qualite = st.select_slider(
-        "Qualité / Propreté / Chutes",
+        "Qualité / Finition / Chutes",
         options=["Élevé (Mauvais)", "Moyen (Acceptable)", "Faible (Très bien)"],
         value="Faible (Très bien)",
     )
 
     observation = st.text_input(
         "📝 Remarque / Détail travail",
-        placeholder="Ex: pose acrotères, reprise chéneau...",
+        placeholder="Ex: pose acrotères, reprise solin...",
     )
 
-    btn_valider = st.form_submit_button("Enregistrer la production")
+    btn_valider = st.form_submit_button(
+        "Enregistrer le rendement", type="primary", use_container_width=True
+    )
 
     if btn_valider:
       base_presence = 40.0
@@ -413,7 +424,7 @@ elif onglet == "📊 Tableau de Bord":
   df_r = get_rapports()
 
   if df_r.empty:
-    st.info("Aucune saisie enregistrée pour le moment.")
+    st.info("Aucune donnée enregistrée pour le moment.")
   else:
     col_f1, col_f2 = st.columns(2)
     with col_f1:
