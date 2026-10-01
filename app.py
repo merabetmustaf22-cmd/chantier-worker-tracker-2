@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_dynamique_pro_v19.db")
+DB_PATH = os.path.join("/tmp", "chantier_dynamique_v21.db")
 
 LISTE_CHANTIERS = [
     "CAC-31-24",
@@ -138,7 +138,7 @@ def get_workers_df():
   return df
 
 
-# --- APPLICATION ---
+# --- INTERFACE PRINCIPALE ---
 st.title("🏗️ Suivi de Chantier & Étanchéité")
 menu = st.radio(
     "Navigation",
@@ -150,7 +150,7 @@ menu = st.radio(
     horizontal=True,
 )
 
-# 1. SAISIE INDIVIDUELLE AVEC MASQUAGE DYNAMIQUE
+# 1. SAISIE INDIVIDUELLE
 if menu == "⚡ Saisie par Ouvrier":
   st.subheader("Pointage & Rendement Individuel")
 
@@ -173,7 +173,6 @@ if menu == "⚡ Saisie par Ouvrier":
   else:
     donnees_ouvriers = {}
 
-    # Bla st.form bach Streamlit y-réagir direct ki tbdel le statut
     for _, row in fixes.iterrows():
       w_id = row["id"]
       w_nom = row["nom"]
@@ -197,7 +196,7 @@ if menu == "⚡ Saisie par Ouvrier":
       apprec_val = "-"
       obs_val = ""
 
-      # Ila kan présent wla demi-journée ykhorjou les détails ta3 l'khdma
+      # Ouvrier présent ou en demi-journée
       if "Présent" in st_val or "1/2" in st_val:
         col_t1, col_t2 = st.columns(2)
         with col_t1:
@@ -205,15 +204,22 @@ if menu == "⚡ Saisie par Ouvrier":
               "Tâche effectuée", LISTE_TACHES, key=f"tch_{w_id}"
           )
         with col_t2:
+          est_bricol_defaut = "BRICOL" in tache_val.upper() or tache_val in [
+              "DIVERS",
+              "nettoyage",
+              "PONSAGE",
+          ]
           type_travail = st.selectbox(
               "Type d'activité",
-              ["Métrage (m² / ml)", "Bricol / Forfait jour"],
+              ["Métrage (m² / ml)", "Bricol / Sans métrage"],
+              index=1 if est_bricol_defaut else 0,
               key=f"typ_{w_id}",
           )
 
-        col_r1, col_r2, col_r3 = st.columns([1.5, 1.5, 2])
-        with col_r1:
-          if type_travail == "Métrage (m² / ml)":
+        # Si l'activité est avec métrage : afficher le champ numérique
+        if type_travail == "Métrage (m² / ml)":
+          col_r1, col_r2, col_r3 = st.columns([1.5, 1.5, 2])
+          with col_r1:
             qte_val = st.number_input(
                 "Production réalisée",
                 min_value=0.0,
@@ -222,32 +228,50 @@ if menu == "⚡ Saisie par Ouvrier":
                 key=f"qte_{w_id}",
             )
             unite_val = "m²"
-          else:
-            unite_val = "Sans métrage"
-            qte_val = 1.0
-            st.info("Bricolage")
-        with col_r2:
-          apprec_val = st.selectbox(
-              "Qualité d'exécution",
-              [
-                  "🟢 Conforme / Soigné",
-                  "🟡 Moyen / Acceptable",
-                  "🔴 Non conforme / À reprendre",
-              ],
-              key=f"app_{w_id}",
-          )
-        with col_r3:
-          obs_val = st.text_input(
-              "Observation libre",
-              placeholder="Ex: terrasse sud, relevés...",
-              key=f"obs_{w_id}",
-          )
+          with col_r2:
+            apprec_val = st.selectbox(
+                "Qualité d'exécution",
+                [
+                    "🟢 Conforme / Soigné",
+                    "🟡 Moyen / Acceptable",
+                    "🔴 Non conforme / À reprendre",
+                ],
+                key=f"app_{w_id}",
+            )
+          with col_r3:
+            obs_val = st.text_input(
+                "Observation libre",
+                placeholder="Ex: terrasse sud, relevés...",
+                key=f"obs_{w_id}",
+            )
 
-      # Ila kan absent (autorisée wla non autorisée) : kolch ykhtafi
+        # Si Bricol / Sans métrage : la case du métrage est masquée
+        else:
+          unite_val = "Sans métrage"
+          qte_val = 1.0
+          col_b1, col_b2 = st.columns([1.5, 2.5])
+          with col_b1:
+            apprec_val = st.selectbox(
+                "Qualité d'exécution",
+                [
+                    "🟢 Conforme / Soigné",
+                    "🟡 Moyen / Acceptable",
+                    "🔴 Non conforme / À reprendre",
+                ],
+                key=f"app_br_{w_id}",
+            )
+          with col_b2:
+            obs_val = st.text_input(
+                "Détail du bricolage",
+                placeholder="Ex: réparation solin, traitement regard, finitions...",
+                key=f"obs_br_{w_id}",
+            )
+
+      # Si absent : la production complète est masquée
       else:
         obs_val = st.text_input(
             "Motif / Observation de l'absence",
-            placeholder="Ex: congé payé, certificat médical, sans motif...",
+            placeholder="Ex: congé, arrêt maladie, sans motif...",
             key=f"obs_abs_{w_id}",
         )
 
@@ -349,7 +373,7 @@ elif menu == "⚙️ Affectations Fixes":
             else 0
         )
         nouvelles_affectations[row["id"]] = st.selectbox(
-            f"Chantier de {row['nom']}",
+            f"Chantier fixe de {row['nom']}",
             LISTE_CHANTIERS,
             index=idx,
             key=f"ch_fix_{row['id']}",
