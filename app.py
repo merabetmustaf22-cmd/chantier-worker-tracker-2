@@ -7,10 +7,14 @@ import pandas as pd
 from PIL import Image
 import streamlit as st
 
-# Moteur de formatage Excel avancé
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+# Import optionnel et sécurisé pour Streamlit Cloud
+try:
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    OPENPYXL_DISPO = True
+except ImportError:
+    OPENPYXL_DISPO = False
 
 st.set_page_config(
     page_title="Suivi de Chantier & Étanchéité",
@@ -124,7 +128,6 @@ def init_database():
     
     conn.commit()
     conn.close()
-    
     recuperer_anciennes_donnees()
 
 def recuperer_anciennes_donnees():
@@ -213,13 +216,13 @@ def get_photo_path(identifiant):
     return None
 
 def generer_fichier_excel_pro(df_data, titre_rapport="RAPPORT JOURNALIER D'ACTIVITÉ & ÉTANCHÉITÉ"):
-    """Génère un classeur Excel stylisé avec en-têtes d'entreprise, bordures et largeurs automatiques."""
+    if not OPENPYXL_DISPO:
+        return None
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Suivi Chantier"
     ws.views.sheetView[0].showGridLines = True
 
-    # 1. En-tête officiel
     ws.merge_cells("A1:J1")
     titre_cell = ws["A1"]
     titre_cell.value = titre_rapport
@@ -228,7 +231,6 @@ def generer_fichier_excel_pro(df_data, titre_rapport="RAPPORT JOURNALIER D'ACTIV
     titre_cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 40
 
-    # 2. Métadonnées du rapport
     ws["A2"] = f"Date d'exportation : {datetime.now().strftime('%d/%m/%Y à %H:%M')}"
     ws["A2"].font = Font(name="Calibri", size=10, italic=True, color="555555")
     ws["J2"] = f"Total entrées : {len(df_data)}"
@@ -236,7 +238,6 @@ def generer_fichier_excel_pro(df_data, titre_rapport="RAPPORT JOURNALIER D'ACTIV
     ws["J2"].alignment = Alignment(horizontal="right")
     ws.row_dimensions[2].height = 20
 
-    # 3. Ligne d'en-tête du tableau
     headers = list(df_data.columns)
     ws.append(headers)
     header_row_idx = 3
@@ -258,7 +259,6 @@ def generer_fichier_excel_pro(df_data, titre_rapport="RAPPORT JOURNALIER D'ACTIV
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = thin_border
 
-    # 4. Données avec alternance de lignes
     zebra_fill = PatternFill(start_color="F2F5F8", end_color="F2F5F8", fill_type="solid")
     data_font = Font(name="Calibri", size=10)
 
@@ -274,16 +274,13 @@ def generer_fichier_excel_pro(df_data, titre_rapport="RAPPORT JOURNALIER D'ACTIV
             if is_even:
                 c.fill = zebra_fill
 
-            # Alignements intelligents
-            val_str = str(c.value or "")
-            if col_idx in [1, 5, 8, 10]:  # Date, Statut, Qualité, Score
+            if col_idx in [1, 5, 8, 10]:
                 c.alignment = Alignment(horizontal="center", vertical="center")
-            elif col_idx == 7:           # Production
+            elif col_idx == 7:
                 c.alignment = Alignment(horizontal="right", vertical="center")
             else:
                 c.alignment = Alignment(horizontal="left", vertical="center")
 
-    # 5. Ajustement automatique de la largeur des colonnes
     for col in ws.columns:
         max_len = max(len(str(cell.value or '')) for cell in col)
         col_letter = get_column_letter(col[0].column)
@@ -293,7 +290,6 @@ def generer_fichier_excel_pro(df_data, titre_rapport="RAPPORT JOURNALIER D'ACTIV
     wb.save(output)
     return output.getvalue()
 
-# --- NOTIFICATIONS STREAMLIT ---
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
 
@@ -324,7 +320,6 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
         st.subheader(f"Pointage Journalier — {default_nom}")
 
     date_choisie = st.date_input("📅 Date de saisie", value=date.today(), key=f"date_{conducteur_id_tag}")
-
     chantiers_autorises = get_chantiers_conducteur(conducteur_id_tag)
 
     if not chantiers_autorises:
@@ -332,7 +327,6 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
         return
 
     chantier_choisi = st.selectbox("📍 Sélectionner le Chantier", chantiers_autorises, key=f"ch_sel_{conducteur_id_tag}")
-
     date_str = str(date_choisie)
     deja_fait = est_deja_valide(date_str, chantier_choisi)
 
@@ -515,7 +509,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             for i in range(0, len(MODULES_ADMIN), 2):
                 col_c1, col_c2 = st.columns(2)
-                
                 tag1, titre1, desc1 = MODULES_ADMIN[i]
                 with col_c1:
                     st.markdown(f"""
@@ -550,10 +543,8 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             st.markdown("---")
 
-            # 1. MODULE REGISTRE & RAPPORTS
             if mod_actuel == "mod_rapport":
                 st.markdown("### 📊 Registre & Gestion des Saisies Conducteurs")
-                
                 tab_reg, tab_corr = st.tabs(["📋 Registre & Exportation Excel", "✏️ Corriger un Pointage (Admin)"])
 
                 conn = get_db_connection()
@@ -610,27 +601,28 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         st.markdown("#### 📥 Téléchargements Officiels")
                         col_dl1, col_dl2 = st.columns(2)
 
-                        # Génération du fichier Excel Pro
-                        excel_pro_bytes = generer_fichier_excel_pro(df_final_export)
+                        csv_propre = df_final_export.to_csv(index=False, sep=";", encoding="utf-8-sig")
                         with col_dl1:
                             st.download_button(
-                                "📗 Télécharger le Rapport Excel (.xlsx)",
-                                data=excel_pro_bytes,
-                                file_name=f"rapport_travaux_{date.today()}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
-
-                        # Génération CSV Pro (Point-virgule et UTF-8 BOM)
-                        csv_propre = df_final_export.to_csv(index=False, sep=";", encoding="utf-8-sig")
-                        with col_dl2:
-                            st.download_button(
-                                "📥 Télécharger en CSV (Séparateur ;)",
+                                "📥 Télécharger CSV Pro (Excel avec colonnes)",
                                 data=csv_propre.encode("utf-8-sig"),
                                 file_name=f"rapport_travaux_{date.today()}.csv",
                                 mime="text/csv",
                                 use_container_width=True
                             )
+
+                        with col_dl2:
+                            if OPENPYXL_DISPO:
+                                excel_pro_bytes = generer_fichier_excel_pro(df_final_export)
+                                st.download_button(
+                                    "📗 Télécharger le Rapport Excel (.xlsx)",
+                                    data=excel_pro_bytes,
+                                    file_name=f"rapport_travaux_{date.today()}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+                            else:
+                                st.caption("💡 Le CSV ci-contre s'ouvre parfaitement dans Excel avec séparateur `;`.")
 
                 with tab_corr:
                     st.markdown("##### Rectifier ou supprimer une saisie erronée")
@@ -641,13 +633,11 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             lambda r: f"ID #{r['ID']} | {r['Date']} | {r['Chantier']} | {r['Ouvrier']} ({r['Conducteur']})",
                             axis=1
                         )
-                        
                         ligne_choisie = st.selectbox(
                             "Sélectionner l'enregistrement à corriger :",
                             df_all_pointages["label"].tolist(),
                             key="sel_pt_correction"
                         )
-                        
                         row_sel = df_all_pointages[df_all_pointages["label"] == ligne_choisie].iloc[0]
                         pt_id = int(row_sel["ID"])
 
@@ -670,7 +660,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                         with col_c2:
                             type_activite_mod = st.selectbox("Type :", ["Métrage (m² / ml)", "Bricol / Sans métrage"], index=1 if row_sel["Unite"] == "Sans métrage" else 0, key=f"mod_typ_{pt_id}")
-                            
                             if type_activite_mod == "Métrage (m² / ml)":
                                 mod_qte = st.number_input("Production :", min_value=0.0, step=1.0, value=float(row_sel["Quantite"]), key=f"mod_qte_{pt_id}")
                                 mod_unite = "m²"
@@ -683,9 +672,8 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             mod_apprec = st.selectbox("Qualité :", qualites_possibles, index=idx_qual, key=f"mod_qual_{pt_id}")
 
                         mod_obs = st.text_input("Observation :", value=str(row_sel["Observation"]) if row_sel["Observation"] != "-" else "", key=f"mod_obs_{pt_id}")
-
                         col_btn_mod, col_btn_del = st.columns([2, 1])
-                        
+
                         with col_btn_mod:
                             if st.button("💾 Sauvegarder la correction", type="primary", use_container_width=True):
                                 if "Présent" in mod_statut:
@@ -722,7 +710,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 st.session_state["sync_notif"] = f"🗑️ Pointage #{pt_id} supprimé du registre."
                                 st.rerun()
 
-            # 2. MODULE CHANTIERS & CORPS D'ÉTAT
             elif mod_actuel == "mod_chantiers_taches":
                 st.markdown("### 🏗️ Gestion des Chantiers & Corps d'état (Tâches)")
                 tab_ch, tab_tch = st.tabs(["📍 Gestion des Chantiers", "🔨 Gestion des Corps d'état (Tâches)"])
@@ -833,7 +820,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             st.session_state["sync_notif"] = f"🗑️ Corps d'état {tch_a_suppr} supprimé."
                             st.rerun()
 
-            # 3. MODULE PROFILS & PHOTOS
             elif mod_actuel == "mod_profils":
                 st.markdown("### 👥 Gestion des Profils & Photos (Conducteurs & Ouvriers)")
                 tab_conducteurs, tab_ouvriers = st.tabs(["👷 Profils Conducteurs", "👷 Profils Ouvriers"])
@@ -981,7 +967,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             st.session_state["sync_notif"] = f"🗑️ {ouvrier_a_del} supprimé de la base."
                             st.rerun()
 
-            # 4. MODULE CHANTIERS / CONDUCTEURS
             elif mod_actuel == "mod_chantiers_cond":
                 st.markdown("### 🏗️ Attribution des Chantiers aux Conducteurs")
                 chantiers_disponibles = [c for c in get_all_chantiers() if c != "EN ATTENTE / DEPOT"]
@@ -1013,7 +998,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.session_state["sync_notif"] = f"🔄 Attributions mises à jour !"
                     st.rerun()
 
-            # 5. MODULE EQUIPES PAR CHANTIER
             elif mod_actuel == "mod_equipes":
                 st.markdown("### ⚡ Définir l'équipe autorisée sur un chantier")
                 chantiers_dispos = [c for c in get_all_chantiers() if c != "EN ATTENTE / DEPOT"]
@@ -1040,7 +1024,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.session_state["sync_notif"] = f"🔄 Équipe verrouillée pour {ch_cible} ({len(nouveaux_membres)} ouvriers) !"
                     st.rerun()
 
-            # 6. MODULE TRANSFERT
             elif mod_actuel == "mod_transfert":
                 st.markdown("### 🔄 Transférer un ouvrier vers un autre chantier")
                 df_w_admin = get_workers_df()
