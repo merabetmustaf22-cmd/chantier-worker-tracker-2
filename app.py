@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_tracker_v2.db")
+DB_PATH = os.path.join("/tmp", "chantier_tracker_v3.db")
 
 # Liste des 14 Chantiers
 LISTE_CHANTIERS = [
@@ -126,7 +126,6 @@ def init_database():
             unite TEXT,
             observation TEXT,
             qualite_dechet TEXT,
-            hse_conforme INTEGER,
             score REAL,
             FOREIGN KEY(worker_id) REFERENCES workers(id)
         )
@@ -140,7 +139,6 @@ def init_database():
   conn.close()
 
 
-# Initialisation garantie
 init_database()
 
 
@@ -228,7 +226,6 @@ if onglet == "Saisie Chantier":
     unite = "m²"
     observation = ""
     qualite = "Faible (Très bien)"
-    hse = True
 
     if statut != "Absent / Congé / Maladie":
       est_bricol_auto = "BRICOL" in corps_etat.upper() or corps_etat in [
@@ -265,7 +262,6 @@ if onglet == "Saisie Chantier":
           ],
           value="Faible (Très bien)",
       )
-      hse = st.checkbox("Respect HSE & Port des EPI", value=True)
 
     btn_valider = st.form_submit_button("Enregistrer la saisie")
 
@@ -273,7 +269,10 @@ if onglet == "Saisie Chantier":
       if statut == "Absent / Congé / Maladie":
         score = 0.0
       else:
-        base_presence = 30.0 if statut == "Présent (Travail)" else 15.0
+        # Présence (40 points)
+        base_presence = 40.0 if statut == "Présent (Travail)" else 20.0
+
+        # Productivité (40 points)
         if unite == "Sans métrage":
           points_prod = 40.0 if statut == "Présent (Travail)" else 20.0
         else:
@@ -286,23 +285,23 @@ if onglet == "Saisie Chantier":
           else:
             points_prod = 0.0
 
-        points_qualite = (
-            15.0
-            if qualite == "Faible (Très bien)"
-            else (10.0 if qualite == "Moyen (Acceptable)" else 0.0)
-        )
-        points_hse = 15.0 if hse else 0.0
-        score = min(
-            base_presence + points_prod + points_qualite + points_hse, 100.0
-        )
+        # Qualité (20 points)
+        if qualite == "Faible (Très bien)":
+          points_qualite = 20.0
+        elif qualite == "Moyen (Acceptable)":
+          points_qualite = 10.0
+        else:
+          points_qualite = 0.0
+
+        score = min(base_presence + points_prod + points_qualite, 100.0)
 
       conn = sqlite3.connect(DB_PATH)
       c = conn.cursor()
       c.execute(
           """
                 INSERT INTO rapports_journaliers 
-                (date_jour, chantier, worker_id, statut, corps_etat, quantite, unite, observation, qualite_dechet, hse_conforme, score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (date_jour, chantier, worker_id, statut, corps_etat, quantite, unite, observation, qualite_dechet, score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
           (
               str(date_jour),
@@ -314,13 +313,14 @@ if onglet == "Saisie Chantier":
               unite,
               observation,
               qualite,
-              int(hse),
               score,
           ),
       )
       conn.commit()
       conn.close()
-      st.success(f"Enregistré pour {nom_ouvrier} sur {chantier} !")
+      st.success(
+          f"Enregistré pour {nom_ouvrier} sur {chantier} (Score: {score}/100) !"
+      )
 
 # 2. TABLEAU DE BORD
 elif onglet == "Tableau de Bord":
