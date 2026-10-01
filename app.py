@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_tracker_v4.db")
+DB_PATH = os.path.join("/tmp", "chantier_tracker_v5.db")
 
 # 14 Chantiers
 LISTE_CHANTIERS = [
@@ -32,13 +32,8 @@ LISTE_CHANTIERS = [
     "ESC-16-24",
 ]
 
-# Corps d'état & Tâches
+# Corps d'état & Motifs
 LISTE_CORPS_ETAT = [
-    "CONGÉ",
-    "MALADIE",
-    "RECUPERATION",
-    "1/2 journée",
-    "Absence autorisée",
     "PAX",
     "PARE-VAPEUR",
     "SOKLE PARE-VAPEUR",
@@ -74,6 +69,11 @@ LISTE_CORPS_ETAT = [
     "BRICOL PARE-VAPEUR",
     "BRICOL Cheminée",
     "DIVERS",
+    "CONGÉ",
+    "MALADIE",
+    "RECUPERATION",
+    "1/2 journée",
+    "Absence autorisée",
 ]
 
 # Effectif de 23 ouvriers
@@ -162,14 +162,19 @@ def get_rapports():
             r.chantier AS Chantier,
             w.nom AS Ouvrier,
             r.statut AS Statut,
-            r.corps_etat AS [Corps d'État],
+            r.corps_etat AS [Corps d'État / Motif],
             CASE 
-                WHEN r.unite = 'Sans métrage' THEN 'Bricol / Journée'
+                WHEN r.statut LIKE '%Absence autorisée%' THEN 'Excusé'
+                WHEN r.statut LIKE '%Injustifiée%' THEN 'Non justifié'
+                WHEN r.unite = 'Sans métrage' THEN 'Bricol / Jour'
                 ELSE r.quantite || ' ' || r.unite 
             END AS Production,
             COALESCE(r.observation, '-') AS Observation,
             r.qualite_dechet AS Qualite,
-            r.score AS Score
+            CASE 
+                WHEN r.score IS NULL THEN 'Justifié'
+                ELSE CAST(r.score AS TEXT)
+            END AS Score
         FROM rapports_journaliers r
         JOIN workers w ON r.worker_id = w.id
         ORDER BY r.id DESC
@@ -183,7 +188,7 @@ def get_rapports():
           "Chantier",
           "Ouvrier",
           "Statut",
-          "Corps d'État",
+          "Corps d'État / Motif",
           "Production",
           "Observation",
           "Qualite",
@@ -216,17 +221,34 @@ if onglet == "Saisie Chantier":
 
     statut = st.radio(
         "Statut de la journée",
-        ["Présent (Travail)", "1/2 journée", "Absent / Congé / Maladie"],
-        horizontal=True,
+        [
+            "Présent (Travail)",
+            "1/2 journée",
+            "Absence autorisée / Justifiée",
+            "Absence non autorisée (Injustifiée)",
+        ],
+        horizontal=False,
     )
-
-    corps_etat = st.selectbox("🛠️ Corps d'état / Tâche", LISTE_CORPS_ETAT)
 
     quantite = 0.0
     unite = "m²"
-    qualite = "Faible (Très bien)"
+    qualite = "-"
 
-    if statut != "Absent / Congé / Maladie":
+    if "Absence" in statut:
+      corps_etat = st.selectbox(
+          "Motif d'absence",
+          [
+              "Absence autorisée",
+              "CONGÉ",
+              "MALADIE",
+              "RECUPERATION",
+              "Absence injustifiée",
+              "Autre",
+          ],
+      )
+    else:
+      corps_etat = st.selectbox("🛠️ Corps d'état / Tâche", LISTE_CORPS_ETAT)
+
       est_bricol_auto = "BRICOL" in corps_etat.upper() or corps_etat in [
           "DIVERS",
           "nettoyage",
@@ -259,24 +281,23 @@ if onglet == "Saisie Chantier":
           value="Faible (Très bien)",
       )
 
-    # Champ observation TOUJOURS visible
     observation = st.text_input(
-        "📝 Remarque / Observation",
+        "📝 Remarque / Observation / Motif",
         placeholder=(
-            "Ex: reprise chéneau, zone acrotère, manque matière, retard, etc."
+            "Ex: autorisation signée, reprise chéneau, arrêt pluie, etc."
         ),
     )
 
     btn_valider = st.form_submit_button("Enregistrer la saisie")
 
     if btn_valider:
-      if statut == "Absent / Congé / Maladie":
-        score = 0.0
+      # Calcul rigoureux du score
+      if statut == "Absence autorisée / Justifiée":
+        score = None  # Neutre : non pénalisé
+      elif statut == "Absence non autorisée (Injustifiée)":
+        score = 0.0  # Sanction directe
       else:
-        # Présence (40 points)
         base_presence = 40.0 if statut == "Présent (Travail)" else 20.0
-
-        # Productivité (40 points)
         if unite == "Sans métrage":
           points_prod = 40.0 if statut == "Présent (Travail)" else 20.0
         else:
@@ -289,14 +310,11 @@ if onglet == "Saisie Chantier":
           else:
             points_prod = 0.0
 
-        # Qualité (20 points)
-        if qualite == "Faible (Très bien)":
-          points_qualite = 20.0
-        elif qualite == "Moyen (Acceptable)":
-          points_qualite = 10.0
-        else:
-          points_qualite = 0.0
-
+        points_qualite = (
+            20.0
+            if qualite == "Faible (Très bien)"
+            else (10.0 if qualite == "Moyen (Acceptable)" else 0.0)
+        )
         score = min(base_presence + points_prod + points_qualite, 100.0)
 
       conn = sqlite3.connect(DB_PATH)
@@ -322,9 +340,7 @@ if onglet == "Saisie Chantier":
       )
       conn.commit()
       conn.close()
-      st.success(
-          f"Enregistré pour {nom_ouvrier} sur {chantier} (Score: {score}/100) !"
-      )
+      st.success(f"Enregistré pour {nom_ouvrier} !")
 
 # 2. TABLEAU DE BORD
 elif onglet == "Tableau de Bord":
