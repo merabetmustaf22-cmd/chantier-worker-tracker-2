@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_individuel_pro_v18.db")
+DB_PATH = os.path.join("/tmp", "chantier_dynamique_pro_v19.db")
 
 LISTE_CHANTIERS = [
     "CAC-31-24",
@@ -150,7 +150,7 @@ menu = st.radio(
     horizontal=True,
 )
 
-# 1. SAISIE INDIVIDUELLE PAR OUVRIER
+# 1. SAISIE INDIVIDUELLE AVEC MASQUAGE DYNAMIQUE
 if menu == "⚡ Saisie par Ouvrier":
   st.subheader("Pointage & Rendement Individuel")
 
@@ -163,7 +163,7 @@ if menu == "⚡ Saisie par Ouvrier":
   df_w = get_workers_df()
   fixes = df_w[df_w["chantier_fixe"] == chantier_choisi]
 
-  st.markdown(f"#### 👷 Équipe du chantier ({len(fixes)} ouvriers)")
+  st.markdown(f"#### 👷 Équipe affectée au site ({len(fixes)} ouvriers)")
 
   if fixes.empty:
     st.warning(
@@ -171,155 +171,160 @@ if menu == "⚡ Saisie par Ouvrier":
         " dans l'onglet '⚙️ Affectations Fixes'."
     )
   else:
-    with st.form("form_pointage_individuel", clear_on_submit=False):
-      donnees_ouvriers = {}
+    donnees_ouvriers = {}
 
-      for _, row in fixes.iterrows():
-        w_id = row["id"]
-        w_nom = row["nom"]
+    # Bla st.form bach Streamlit y-réagir direct ki tbdel le statut
+    for _, row in fixes.iterrows():
+      w_id = row["id"]
+      w_nom = row["nom"]
 
-        st.markdown(f"### 👷 {w_nom}")
+      st.markdown(f"### 👷 {w_nom}")
 
-        # Ligne 1 : Statut de présence
-        st_val = st.selectbox(
-            "Statut de présence",
-            [
-                "Présent (Journée)",
-                "1/2 journée",
-                "Absence Autorisée (Congé/Maladie)",
-                "Absence Non Autorisée (Injustifiée)",
-            ],
-            key=f"st_{w_id}",
-        )
-
-        tache_val = "-"
-        qte_val = 0.0
-        unite_val = "m²"
-        apprec_val = "-"
-        obs_val = ""
-
-        # Si l'ouvrier est présent ou en demi-journée
-        if "Présent" in st_val or "1/2" in st_val:
-          col_t1, col_t2 = st.columns(2)
-          with col_t1:
-            tache_val = st.selectbox(
-                "Tâche effectuée", LISTE_TACHES, key=f"tch_{w_id}"
-            )
-          with col_t2:
-            type_travail = st.selectbox(
-                "Type d'activité",
-                ["Métrage (m² / ml)", "Bricol / Forfait jour"],
-                key=f"typ_{w_id}",
-            )
-
-          col_r1, col_r2, col_r3 = st.columns([1.5, 1.5, 2])
-          with col_r1:
-            if type_travail == "Métrage (m² / ml)":
-              qte_val = st.number_input(
-                  "Production réalisée",
-                  min_value=0.0,
-                  step=1.0,
-                  value=25.0,
-                  key=f"qte_{w_id}",
-              )
-            else:
-              unite_val = "Sans métrage"
-              qte_val = 1.0
-              st.info("Bricolage")
-          with col_r2:
-            apprec_val = st.selectbox(
-                "Qualité d'exécution",
-                [
-                    "🟢 Conforme / Soigné",
-                    "🟡 Moyen / Acceptable",
-                    "🔴 Non conforme / À reprendre",
-                ],
-                key=f"app_{w_id}",
-            )
-          with col_r3:
-            obs_val = st.text_input(
-                "Observation libre",
-                placeholder="Ex: terrasse sud, relevés...",
-                key=f"obs_{w_id}",
-            )
-
-        st.markdown("---")
-
-        donnees_ouvriers[w_id] = {
-            "statut": st_val,
-            "tache": tache_val,
-            "quantite": qte_val,
-            "unite": unite_val,
-            "appreciation": apprec_val,
-            "observation": obs_val,
-        }
-
-      btn_valider = st.form_submit_button(
-          "💾 Valider la journée de l'équipe",
-          type="primary",
-          use_container_width=True,
+      st_val = st.selectbox(
+          "Statut de présence",
+          [
+              "Présent (Journée)",
+              "1/2 journée",
+              "Absence Autorisée (Congé/Maladie)",
+              "Absence Non Autorisée (Injustifiée)",
+          ],
+          key=f"st_{w_id}",
       )
 
-      if btn_valider:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
+      tache_val = "-"
+      qte_val = 0.0
+      unite_val = "-"
+      apprec_val = "-"
+      obs_val = ""
 
-        for w_id, d in donnees_ouvriers.items():
-          st_val = d["statut"]
-          qte = d["quantite"]
-          unite = d["unite"]
-          app = d["appreciation"]
-
-          # Calcul de la note individuelle sur 100
-          if "Présent" in st_val:
-            base_p = 40.0
-            pts_prod = (
-                40.0
-                if (unite == "Sans métrage" or qte >= 30)
-                else (30.0 if qte >= 20 else 15.0)
-            )
-            pts_app = (
-                20.0
-                if "Conforme" in app
-                else (
-                    10.0
-                    if "Moyen" in app
-                    else (0.0 if "Non conforme" in app else 10.0)
-                )
-            )
-            score = min(base_p + pts_prod + pts_app, 100.0)
-          elif "1/2" in st_val:
-            score = 35.0
-          elif "Autorisée" in st_val:
-            score = None
-          else:
-            score = 0.0
-
-          c.execute(
-              """
-                    INSERT INTO pointages (date_jour, chantier, worker_id, statut, tache, quantite, unite, appreciation, observation, score)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-              (
-                  str(date_choisie),
-                  chantier_choisi,
-                  w_id,
-                  st_val,
-                  d["tache"],
-                  qte,
-                  unite,
-                  app,
-                  d["observation"],
-                  score,
-              ),
+      # Ila kan présent wla demi-journée ykhorjou les détails ta3 l'khdma
+      if "Présent" in st_val or "1/2" in st_val:
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+          tache_val = st.selectbox(
+              "Tâche effectuée", LISTE_TACHES, key=f"tch_{w_id}"
+          )
+        with col_t2:
+          type_travail = st.selectbox(
+              "Type d'activité",
+              ["Métrage (m² / ml)", "Bricol / Forfait jour"],
+              key=f"typ_{w_id}",
           )
 
-        conn.commit()
-        conn.close()
-        st.success(
-            f"Pointage et rendements enregistrés avec succès pour"
-            f" {chantier_choisi} !"
+        col_r1, col_r2, col_r3 = st.columns([1.5, 1.5, 2])
+        with col_r1:
+          if type_travail == "Métrage (m² / ml)":
+            qte_val = st.number_input(
+                "Production réalisée",
+                min_value=0.0,
+                step=1.0,
+                value=25.0,
+                key=f"qte_{w_id}",
+            )
+            unite_val = "m²"
+          else:
+            unite_val = "Sans métrage"
+            qte_val = 1.0
+            st.info("Bricolage")
+        with col_r2:
+          apprec_val = st.selectbox(
+              "Qualité d'exécution",
+              [
+                  "🟢 Conforme / Soigné",
+                  "🟡 Moyen / Acceptable",
+                  "🔴 Non conforme / À reprendre",
+              ],
+              key=f"app_{w_id}",
+          )
+        with col_r3:
+          obs_val = st.text_input(
+              "Observation libre",
+              placeholder="Ex: terrasse sud, relevés...",
+              key=f"obs_{w_id}",
+          )
+
+      # Ila kan absent (autorisée wla non autorisée) : kolch ykhtafi
+      else:
+        obs_val = st.text_input(
+            "Motif / Observation de l'absence",
+            placeholder="Ex: congé payé, certificat médical, sans motif...",
+            key=f"obs_abs_{w_id}",
         )
+
+      st.markdown("---")
+
+      donnees_ouvriers[w_id] = {
+          "statut": st_val,
+          "tache": tache_val,
+          "quantite": qte_val,
+          "unite": unite_val,
+          "appreciation": apprec_val,
+          "observation": obs_val,
+      }
+
+    if st.button(
+        "💾 Valider la journée de l'équipe",
+        type="primary",
+        use_container_width=True,
+    ):
+      conn = sqlite3.connect(DB_PATH)
+      c = conn.cursor()
+
+      for w_id, d in donnees_ouvriers.items():
+        st_val = d["statut"]
+        qte = d["quantite"]
+        unite = d["unite"]
+        app = d["appreciation"]
+
+        if "Présent" in st_val:
+          base_p = 40.0
+          pts_prod = (
+              40.0
+              if (unite == "Sans métrage" or qte >= 30)
+              else (30.0 if qte >= 20 else 15.0)
+          )
+          pts_app = (
+              20.0
+              if "Conforme" in app
+              else (
+                  10.0
+                  if "Moyen" in app
+                  else (0.0 if "Non conforme" in app else 10.0)
+              )
+          )
+          score = min(base_p + pts_prod + pts_app, 100.0)
+        elif "1/2" in st_val:
+          score = 35.0
+        elif "Autorisée" in st_val:
+          score = None
+        else:
+          score = 0.0
+
+        c.execute(
+            """
+                INSERT INTO pointages (date_jour, chantier, worker_id, statut, tache, quantite, unite, appreciation, observation, score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(date_choisie),
+                chantier_choisi,
+                w_id,
+                st_val,
+                d["tache"],
+                qte,
+                unite,
+                app,
+                d["observation"],
+                score,
+            ),
+        )
+
+      conn.commit()
+      conn.close()
+      st.success(
+          f"Pointage et rendements enregistrés avec succès pour"
+          f" {chantier_choisi} !"
+      )
 
 # 2. DEFINITION DES EQUIPES FIXES
 elif menu == "⚙️ Affectations Fixes":
@@ -344,7 +349,7 @@ elif menu == "⚙️ Affectations Fixes":
             else 0
         )
         nouvelles_affectations[row["id"]] = st.selectbox(
-            f"Chantier fixe de {row['nom']}",
+            f"Chantier de {row['nom']}",
             LISTE_CHANTIERS,
             index=idx,
             key=f"ch_fix_{row['id']}",
