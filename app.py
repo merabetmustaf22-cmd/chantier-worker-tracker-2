@@ -4,17 +4,17 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-# Configuration de l'affichage mobile
+# Configuration de la page
 st.set_page_config(
-    page_title="Suivi Chantier Étanchéité",
+    page_title="Suivi Chantier & Pointage",
     page_icon="🏗️",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_tracker_v8.db")
+DB_PATH = os.path.join("/tmp", "chantier_tracker_v9.db")
 
-# Liste des 14 chantiers
+# Vos 14 Chantiers
 LISTE_CHANTIERS = [
     "CAC-31-24",
     "CMA-09-23",
@@ -32,7 +32,7 @@ LISTE_CHANTIERS = [
     "ESC-16-24",
 ]
 
-# Corps d'état & Tâches
+# Vos Corps d'état & Tâches
 LISTE_CORPS_ETAT = [
     "PAX",
     "PARE-VAPEUR",
@@ -71,7 +71,7 @@ LISTE_CORPS_ETAT = [
     "DIVERS",
 ]
 
-# Effectif complet des 23 ouvriers
+# Effectif de vos 23 ouvriers
 EFFECTIF_GLOBAL = [
     "ADDA Abbess",
     "MEKHACHEF DJAMEL",
@@ -96,6 +96,13 @@ EFFECTIF_GLOBAL = [
     "GHRIBI MOHAMED",
     "MESSAOUDI ABDELKRIM",
     "TAHAR BOUZIAN YOUCEF",
+]
+
+OPTIONS_STATUT = [
+    "Présent (Journée)",
+    "1/2 journée",
+    "Absence autorisée (Congé/Maladie)",
+    "Absence non autorisée",
 ]
 
 
@@ -160,7 +167,7 @@ def get_rapports():
             r.corps_etat AS [Corps d'État / Motif],
             CASE 
                 WHEN r.statut LIKE '%Absence autorisée%' THEN 'Excusé'
-                WHEN r.statut LIKE '%Injustifiée%' THEN 'Non justifié'
+                WHEN r.statut LIKE '%Absence non autorisée%' THEN 'Non justifié'
                 WHEN r.unite = 'Sans métrage' THEN 'Bricol / Jour'
                 ELSE r.quantite || ' ' || r.unite 
             END AS Production,
@@ -192,121 +199,188 @@ def get_rapports():
   )
 
 
-# --- INTERFACE PRINCIPALE ---
+# --- INTERFACE ---
 st.title("🏗️ Suivi Chantier Étanchéité")
 onglet = st.radio(
-    "Menu", ["Saisie Chantier", "Tableau de Bord"], horizontal=True
+    "Menu",
+    ["📋 Pointage Rapide (Équipe)", "✍️ Rendement / Bricol", "📊 Tableau de Bord"],
+    horizontal=True,
 )
 
-# 1. SAISIE DU CHANTIER
-if onglet == "Saisie Chantier":
-  st.subheader("Pointage & Rendement")
+# 1. POINTAGE RAPIDE COLLECTIF
+if onglet == "📋 Pointage Rapide (Équipe)":
+  st.subheader("Pointage Collectif Journalier")
+  st.caption(
+      "Modifiez le statut ou le motif uniquement pour les absents, puis validez"
+      " en un clic."
+  )
+
+  col1, col2 = st.columns(2)
+  with col1:
+    chantier_sel = st.selectbox("📍 Chantier", LISTE_CHANTIERS, key="ptg_ch")
+  with col2:
+    date_sel = st.date_input("📅 Date", value=date.today(), key="ptg_dt")
+
+  # Préparation du tableau avec statut 'Présent' par défaut
+  df_base = pd.DataFrame({
+      "Ouvrier": EFFECTIF_GLOBAL,
+      "Statut": ["Présent (Journée)"] * len(EFFECTIF_GLOBAL),
+      "Observation / Motif": [""] * len(EFFECTIF_GLOBAL),
+  })
+
+  # Tableau éditable avec listes déroulantes intégrées
+  df_modifie = st.data_editor(
+      df_base,
+      column_config={
+          "Ouvrier": st.column_config.TextColumn("Ouvrier", disabled=True),
+          "Statut": st.column_config.SelectboxColumn(
+              "Statut Présence",
+              options=OPTIONS_STATUT,
+              required=True,
+          ),
+          "Observation / Motif": st.column_config.TextColumn(
+              "Observation / Motif absence",
+              help="Ex: Congé payé, Maladie avec certificat, Retard",
+          ),
+      },
+      hide_index=True,
+      use_container_width=True,
+  )
+
+  if st.button(
+      "💾 Enregistrer le pointage de l'équipe", use_container_width=True
+  ):
+    df_w = get_workers()
+    ouvriers_dict = dict(zip(df_w["nom"], df_w["id"]))
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    nb_inseres = 0
+    for _, row in df_modifie.iterrows():
+      nom = row["Ouvrier"]
+      statut = row["Statut"]
+      obs = row["Observation / Motif"]
+      w_id = ouvriers_dict[nom]
+
+      # Calcul score & paramètres selon présence
+      if statut == "Absence autorisée (Congé/Maladie)":
+        score = None
+        corps = "Absence autorisée"
+      elif statut == "Absence non autorisée":
+        score = 0.0
+        corps = "Absence injustifiée"
+      elif statut == "1/2 journée":
+        score = 20.0
+        corps = "1/2 journée"
+      else:
+        score = 40.0
+        corps = "Présent"
+
+      c.execute(
+          """
+                INSERT INTO rapports_journaliers 
+                (date_jour, chantier, worker_id, statut, corps_etat, quantite, unite, observation, qualite_dechet, score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+          (
+              str(date_sel),
+              chantier_sel,
+              w_id,
+              statut,
+              corps,
+              0.0,
+              "-",
+              obs,
+              "-",
+              score,
+          ),
+      )
+      nb_inseres += 1
+
+    conn.commit()
+    conn.close()
+    st.success(
+        f"Pointage enregistré avec succès pour les {nb_inseres} ouvriers sur"
+        f" {chantier_sel} !"
+    )
+
+# 2. RENDEMENT / BRICOL (Saisie individuelle pour ceux qui ont métré)
+elif onglet == "✍️ Rendement / Bricol":
+  st.subheader("Détail Rendement & Tâches")
   df_w = get_workers()
   ouvriers_dict = dict(zip(df_w["nom"], df_w["id"]))
 
-  with st.form("form_saisie", clear_on_submit=True):
+  with st.form("form_rendement", clear_on_submit=True):
     col_a, col_b = st.columns(2)
     with col_a:
-      chantier = st.selectbox("📍 Chantier", LISTE_CHANTIERS)
+      chantier = st.selectbox("📍 Chantier", LISTE_CHANTIERS, key="rd_ch")
     with col_b:
-      date_jour = st.date_input("📅 Date", value=date.today())
+      date_jour = st.date_input("📅 Date", value=date.today(), key="rd_dt")
 
     st.markdown("---")
-    nom_ouvrier = st.selectbox("👷 Ouvrier", list(ouvriers_dict.keys()))
+    nom_ouvrier = st.selectbox(
+        "👷 Ouvrier", list(ouvriers_dict.keys()), key="rd_ouv"
+    )
+    corps_etat = st.selectbox("🛠️ Corps d'état / Tâche", LISTE_CORPS_ETAT)
 
-    statut = st.radio(
-        "Statut de la journée",
-        [
-            "Présent (Travail)",
-            "1/2 journée",
-            "Absence autorisée / Justifiée",
-            "Absence non autorisée (Injustifiée)",
-        ],
-        horizontal=False,
+    est_bricol_auto = "BRICOL" in corps_etat.upper() or corps_etat in [
+        "DIVERS",
+        "nettoyage",
+        "PONSAGE",
+        "décapage",
+    ]
+    sans_metrage = st.checkbox(
+        "🔨 Sans métrage (Bricolage / Forfait)", value=est_bricol_auto
     )
 
     quantite = 0.0
     unite = "m²"
-    qualite = "-"
-
-    if "Absence" in statut:
-      corps_etat = st.selectbox(
-          "Motif d'absence",
-          [
-              "Absence autorisée",
-              "CONGÉ",
-              "MALADIE",
-              "RECUPERATION",
-              "Absence injustifiée",
-              "Autre",
-          ],
-      )
+    if not sans_metrage:
+      c1, c2 = st.columns(2)
+      with c1:
+        quantite = st.number_input(
+            "Production réalisée", min_value=0.0, step=0.5, value=25.0
+        )
+      with c2:
+        unite = st.selectbox("Unité", ["m²", "ml", "Unité"])
     else:
-      corps_etat = st.selectbox("🛠️ Corps d'état / Tâche", LISTE_CORPS_ETAT)
-      est_bricol_auto = "BRICOL" in corps_etat.upper() or corps_etat in [
-          "DIVERS",
-          "nettoyage",
-          "PONSAGE",
-          "décapage",
-      ]
-      sans_metrage = st.checkbox(
-          "🔨 Sans métrage (Bricolage / Forfait jour)", value=est_bricol_auto
-      )
+      unite = "Sans métrage"
+      quantite = 1.0
 
-      if not sans_metrage:
-        c1, c2 = st.columns(2)
-        with c1:
-          quantite = st.number_input(
-              "Production réalisée", min_value=0.0, step=0.5, value=25.0
-          )
-        with c2:
-          unite = st.selectbox("Unité", ["m²", "ml", "Unité"])
-      else:
-        unite = "Sans métrage"
-        quantite = 1.0
-
-      qualite = st.select_slider(
-          "Qualité / Propreté / Chutes",
-          options=[
-              "Élevé (Mauvais)",
-              "Moyen (Acceptable)",
-              "Faible (Très bien)",
-          ],
-          value="Faible (Très bien)",
-      )
-
-    observation = st.text_input(
-        "📝 Remarque / Observation libre",
-        placeholder="Ex: détails bricol, retards, météo, etc.",
+    qualite = st.select_slider(
+        "Qualité / Propreté / Chutes",
+        options=["Élevé (Mauvais)", "Moyen (Acceptable)", "Faible (Très bien)"],
+        value="Faible (Très bien)",
     )
 
-    btn_valider = st.form_submit_button("Enregistrer la saisie")
+    observation = st.text_input(
+        "📝 Remarque / Détail travail",
+        placeholder="Ex: pose acrotères, reprise chéneau...",
+    )
+
+    btn_valider = st.form_submit_button("Enregistrer la production")
 
     if btn_valider:
-      if statut == "Absence autorisée / Justifiée":
-        score = None
-      elif statut == "Absence non autorisée (Injustifiée)":
-        score = 0.0
+      base_presence = 40.0
+      if unite == "Sans métrage":
+        points_prod = 40.0
       else:
-        base_presence = 40.0 if statut == "Présent (Travail)" else 20.0
-        if unite == "Sans métrage":
-          points_prod = 40.0 if statut == "Présent (Travail)" else 20.0
+        if quantite >= 40:
+          points_prod = 40.0
+        elif quantite >= 25:
+          points_prod = 30.0
+        elif quantite > 0:
+          points_prod = 15.0
         else:
-          if quantite >= 40:
-            points_prod = 40.0
-          elif quantite >= 25:
-            points_prod = 30.0
-          elif quantite > 0:
-            points_prod = 15.0
-          else:
-            points_prod = 0.0
+          points_prod = 0.0
 
-        points_qualite = (
-            20.0
-            if qualite == "Faible (Très bien)"
-            else (10.0 if qualite == "Moyen (Acceptable)" else 0.0)
-        )
-        score = min(base_presence + points_prod + points_qualite, 100.0)
+      points_qualite = (
+          20.0
+          if qualite == "Faible (Très bien)"
+          else (10.0 if qualite == "Moyen (Acceptable)" else 0.0)
+      )
+      score = min(base_presence + points_prod + points_qualite, 100.0)
 
       conn = sqlite3.connect(DB_PATH)
       c = conn.cursor()
@@ -320,7 +394,7 @@ if onglet == "Saisie Chantier":
               str(date_jour),
               chantier,
               ouvriers_dict[nom_ouvrier],
-              statut,
+              "Présent (Travail)",
               corps_etat,
               quantite,
               unite,
@@ -331,10 +405,10 @@ if onglet == "Saisie Chantier":
       )
       conn.commit()
       conn.close()
-      st.success(f"Enregistré pour {nom_ouvrier} sur {chantier} !")
+      st.success(f"Production enregistrée pour {nom_ouvrier} !")
 
-# 2. TABLEAU DE BORD
-elif onglet == "Tableau de Bord":
+# 3. TABLEAU DE BORD
+elif onglet == "📊 Tableau de Bord":
   st.subheader("Synthèse de l'Activité")
   df_r = get_rapports()
 
@@ -361,7 +435,7 @@ elif onglet == "Tableau de Bord":
 
     csv = df_affiche.to_csv(index=False).encode("utf-8")
     st.download_button(
-        "📥 Exporter cette sélection (CSV)",
+        "📥 Exporter les données (CSV)",
         data=csv,
         file_name="rapport_chantiers_etancheite.csv",
         mime="text/csv",
