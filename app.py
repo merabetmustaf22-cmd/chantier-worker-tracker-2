@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_roles_v32.db"
+DB_PATH = "chantier_roles_v33.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -119,13 +119,14 @@ def init_database():
             UNIQUE(conducteur_tag, chantier)
         )
     """)
+  # Clé unique stricte : impossible d'avoir des doublons pour la même date, chantier et ouvrier
   c.execute("""
         CREATE TABLE IF NOT EXISTS pointages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date_jour TEXT,
-            chantier TEXT,
+            date_jour TEXT NOT NULL,
+            chantier TEXT NOT NULL,
             conducteur TEXT,
-            worker_id INTEGER,
+            worker_id INTEGER NOT NULL,
             statut TEXT,
             tache TEXT,
             quantite REAL,
@@ -133,6 +134,7 @@ def init_database():
             appreciation TEXT,
             observation TEXT,
             score REAL,
+            UNIQUE(date_jour, chantier, worker_id),
             FOREIGN KEY(worker_id) REFERENCES workers(id)
         )
     """)
@@ -168,6 +170,18 @@ def get_chantiers_conducteur(conducteur_tag):
   lignes = c.fetchall()
   conn.close()
   return [r[0] for r in lignes]
+
+
+def est_deja_valide(date_str, chantier):
+  conn = get_db_connection()
+  c = conn.cursor()
+  c.execute(
+      "SELECT COUNT(*) FROM pointages WHERE date_jour = ? AND chantier = ?",
+      (date_str, chantier),
+  )
+  count = c.fetchone()[0]
+  conn.close()
+  return count > 0
 
 
 def get_photo_path(nom_ouvrier):
@@ -219,7 +233,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 
   if not chantiers_autorises:
     st.warning(
-        f"⚠️️ Aucun chantier n'est actuellement attribué à {default_nom}.\n\n"
+        f"⚠️ Aucun chantier n'est actuellement attribué à {default_nom}.\n\n"
         "L'administrateur doit vous affecter vos chantiers dans l'Espace Admin."
     )
     return
@@ -230,7 +244,17 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
       key=f"ch_sel_{conducteur_id_tag}",
   )
 
-  # Récupération automatique et directe des ouvriers affectés à ce chantier
+  # Vérification en direct de l'état de validation
+  date_str = str(date_choisie)
+  deja_fait = est_deja_valide(date_str, chantier_choisi)
+
+  if deja_fait:
+    st.info(
+        f"🟢 **Journée déjà enregistrée pour {chantier_choisi} le {date_str}.**"
+        " Si vous validez à nouveau, les données existantes seront mises à jour"
+        " sans créer de doublon."
+    )
+
   df_w = get_workers_df()
   equipe_active = df_w[df_w["chantier_fixe"] == chantier_choisi]
 
@@ -247,7 +271,6 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
   else:
     donnees_ouvriers = {}
 
-    # Affichage direct de tous les ouvriers affectés au chantier
     for _, row in equipe_active.iterrows():
       w_id = row["id"]
       w_nom = row["nom"]
@@ -283,7 +306,6 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
       apprec_val = "-"
       obs_val = ""
 
-      # Ouvrier présent ou demi-journée
       if "Présent" in st_val or "1/2" in st_val:
         col_t1, col_t2 = st.columns(2)
         with col_t1:
@@ -370,8 +392,14 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
           "observation": obs_val,
       }
 
+    label_bouton = (
+        "🔄 Mettre à jour la journée (Déjà enregistrée)"
+        if deja_fait
+        else "💾 Valider la journée de l'équipe"
+    )
+
     if st.button(
-        "💾 Valider la journée de l'équipe",
+        label_bouton,
         type="primary",
         use_container_width=True,
         key=f"btn_val_{conducteur_id_tag}",
@@ -409,13 +437,14 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
         else:
           score = 0.0
 
+        # INSERT OR REPLACE : Empêche strictement les doublons et met à jour si déjà présent
         c.execute(
             """
-                INSERT INTO pointages (date_jour, chantier, conducteur, worker_id, statut, tache, quantite, unite, appreciation, observation, score)
+                INSERT OR REPLACE INTO pointages (date_jour, chantier, conducteur, worker_id, statut, tache, quantite, unite, appreciation, observation, score)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                str(date_choisie),
+                date_str,
                 chantier_choisi,
                 nom_conducteur if nom_conducteur else default_nom,
                 w_id,
@@ -434,8 +463,9 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 
       heure_validation = datetime.now().strftime("%H:%M:%S")
       st.session_state["sync_notif"] = (
-          f"✅ Journée validée par {nom_conducteur} à {heure_validation} pour"
-          f" {chantier_choisi} ({len(donnees_ouvriers)} ouvrier(s)) !"
+          f"✅ Journée validée sans doublon par {nom_conducteur} à"
+          f" {heure_validation} pour {chantier_choisi} ({len(donnees_ouvriers)}"
+          " ouvrier(s)) !"
       )
       st.rerun()
 
@@ -489,7 +519,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             "🔄 Transférer un ouvrier individuel",
             "📋 Vue générale des équipes",
             "👤 Profils & Gestion des Photos",
-            "📊 Historique des Pointages",
+            "📊 Historique des Pointages (Sans Doublons)",
         ],
     )
 
@@ -715,12 +745,12 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           )
           st.rerun()
 
-    # MODULE 6 : HISTORIQUE
+    # MODULE 6 : HISTORIQUE PROPRE SANS DOUBLONS
     elif (
         sous_menu_admin
-        == "📊 Historique des Pointages"
+        == "📊 Historique des Pointages (Sans Doublons)"
     ):
-      st.markdown("#### Registre des Saisies avec Conducteur de Travaux")
+      st.markdown("#### Registre des Saisies Uniques")
       conn = get_db_connection()
       query = """
             SELECT 
@@ -743,7 +773,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                 END AS Score
             FROM pointages p
             JOIN workers w ON p.worker_id = w.id
-            ORDER BY p.id DESC
+            ORDER BY p.date_jour DESC, p.chantier ASC, w.nom ASC
         """
       df_hist = pd.read_sql_query(query, conn)
       conn.close()
@@ -754,9 +784,9 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         st.dataframe(df_hist, use_container_width=True, hide_index=True)
         csv = df_hist.to_csv(index=False).encode("utf-8")
         st.download_button(
-            "📥 Exporter le registre (CSV)",
+            "📥 Exporter le registre sans doublons (CSV)",
             data=csv,
-            file_name="suivi_chantier_conducteurs.csv",
+            file_name="suivi_chantier_unique.csv",
             mime="text/csv",
             use_container_width=True,
         )
