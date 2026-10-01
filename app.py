@@ -7,12 +7,12 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Suivi de Chantier & Étanchéité",
-    page_icon="🏗️️",
+    page_icon="🏗️",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_roles_v30.db"
+DB_PATH = "chantier_roles_v31.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -112,6 +112,14 @@ def init_database():
         )
     """)
   c.execute("""
+        CREATE TABLE IF NOT EXISTS conducteur_chantiers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conducteur_tag TEXT NOT NULL,
+            chantier TEXT NOT NULL,
+            UNIQUE(conducteur_tag, chantier)
+        )
+    """)
+  c.execute("""
         CREATE TABLE IF NOT EXISTS pointages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date_jour TEXT,
@@ -149,6 +157,19 @@ def get_workers_df():
   return df
 
 
+def get_chantiers_conducteur(conducteur_tag):
+  conn = get_db_connection()
+  c = conn.cursor()
+  c.execute(
+      "SELECT chantier FROM conducteur_chantiers WHERE conducteur_tag = ?"
+      " ORDER BY chantier ASC",
+      (conducteur_tag,),
+  )
+  lignes = c.fetchall()
+  conn.close()
+  return [r[0] for r in lignes]
+
+
 def get_photo_path(nom_ouvrier):
   nom_clean = nom_ouvrier.replace(" ", "_")
   for ext in [".jpg", ".jpeg", ".png"]:
@@ -158,7 +179,7 @@ def get_photo_path(nom_ouvrier):
   return None
 
 
-# --- GESTIÓN DE NOTIFICACIONES ---
+# --- GESTION NOTIFICATIONS PERSISTANTES ---
 if "sync_notif" not in st.session_state:
   st.session_state["sync_notif"] = None
 
@@ -194,9 +215,19 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
         "📅 Date", value=date.today(), key=f"date_{conducteur_id_tag}"
     )
 
+  # Chantiers assignés par l'administrateur à ce conducteur
+  chantiers_autorises = get_chantiers_conducteur(conducteur_id_tag)
+
+  if not chantiers_autorises:
+    st.warning(
+        f"⚠️️ Aucun chantier n'est actuellement attribué à {default_nom}.\n\n"
+        "L'administrateur doit vous affecter vos chantiers dans l'Espace Admin."
+    )
+    return
+
   chantier_choisi = st.selectbox(
-      "📍 Sélectionner le Chantier",
-      [c for c in LISTE_CHANTIERS if c != "EN ATTENTE / DEPOT"],
+      "📍 Sélectionner votre Chantier",
+      chantiers_autorises,
       key=f"ch_sel_{conducteur_id_tag}",
   )
 
@@ -207,7 +238,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 
   if not equipe_fixee_admin:
     st.warning(
-        f"⚠️ Aucun ouvrier n'est actuellement rattaché à {chantier_choisi} par"
+        f"⚠️ Aucun ouvrier n'est rattaché à {chantier_choisi} par"
         " l'administrateur."
     )
   else:
@@ -425,7 +456,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 
 
 # ==============================================================================
-# 1. ESPACIOS DE CONDUCTORES 1 Y 2
+# 1. ESPACES CONDUCTEURS
 # ==============================================================================
 if menu_general == "👷 Espace Conducteur 1":
   interface_saisie_conducteur("c1", "Conducteur 1")
@@ -434,7 +465,7 @@ elif menu_general == "👷 Espace Conducteur 2":
   interface_saisie_conducteur("c2", "Conducteur 2")
 
 # ==============================================================================
-# 2. ESPACIO ADMIN (DIRECCIÓN / GESTIÓN GLOBAL)
+# 2. ESPACE ADMIN (GESTION EXCLUSIVE DES CHANTIERS ET DES ÉQUIPES)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
   st.subheader("Accès Sécurisé - Administration")
@@ -468,23 +499,95 @@ elif menu_general == "🔐 Espace Admin (Direction)":
     sous_menu_admin = st.selectbox(
         "Module Administrateur",
         [
+            "🏗️ Affecter les Chantiers aux Conducteurs",
             "⚡ Fixer l'équipe d'un Chantier",
             "🔄 Transférer un ouvrier individuel",
             "📋 Vue générale des équipes",
             "👤 Profils & Gestion des Photos",
-            "📊 Historique des Pointages (avec Conducteur)",
+            "📊 Historique des Pointages",
         ],
     )
 
     st.markdown("---")
 
-    if sous_menu_admin == "⚡ Fixer l'équipe d'un Chantier":
-      st.markdown("#### Définir l'équipe autorisée sur un chantier")
+    # MODULE 1 : ATTRIBUTION DES CHANTIERS AUX CONDUCTEURS
+    if sous_menu_admin == "🏗️ Affecter les Chantiers aux Conducteurs":
+      st.markdown("#### Attribution des chantiers sous responsabilité")
       st.caption(
-          "L'administrateur fixe les ouvriers qui seront visibles pour les 2"
-          " conducteurs. Tout ouvrier coché ici est retiré de son ancien site."
+          "Sélectionnez les chantiers dont chaque conducteur est responsable."
+          " Il ne pourra voir et pointer que ces chantiers."
       )
 
+      chantiers_disponibles = [
+          c for c in LISTE_CHANTIERS if c != "EN ATTENTE / DEPOT"
+      ]
+
+      col_c1, col_c2 = st.columns(2)
+
+      with col_c1:
+        st.markdown("##### 👷 Conducteur 1")
+        actuels_c1 = get_chantiers_conducteur("c1")
+        nouveaux_c1 = st.multiselect(
+            "Chantiers sous sa responsabilité :",
+            options=chantiers_disponibles,
+            default=actuels_c1,
+            key="ms_admin_assign_c1",
+        )
+
+      with col_c2:
+        st.markdown("##### 👷 Conducteur 2")
+        actuels_c2 = get_chantiers_conducteur("c2")
+        nouveaux_c2 = st.multiselect(
+            "Chantiers sous sa responsabilité :",
+            options=chantiers_disponibles,
+            default=actuels_c2,
+            key="ms_admin_assign_c2",
+        )
+
+      if st.button(
+          "💾 Sauvegarder les attributions des conducteurs",
+          type="primary",
+          use_container_width=True,
+      ):
+        conn = get_db_connection()
+        c = conn.cursor()
+
+        # Réinitialisation et enregistrement pour Conducteur 1
+        c.execute(
+            "DELETE FROM conducteur_chantiers WHERE conducteur_tag = 'c1'"
+        )
+        for ch in nouveaux_c1:
+          c.execute(
+              "INSERT INTO conducteur_chantiers (conducteur_tag, chantier)"
+              " VALUES ('c1', ?)",
+              (ch,),
+          )
+
+        # Réinitialisation et enregistrement pour Conducteur 2
+        c.execute(
+            "DELETE FROM conducteur_chantiers WHERE conducteur_tag = 'c2'"
+        )
+        for ch in nouveaux_c2:
+          c.execute(
+              "INSERT INTO conducteur_chantiers (conducteur_tag, chantier)"
+              " VALUES ('c2', ?)",
+              (ch,),
+          )
+
+        conn.commit()
+        conn.close()
+
+        heure_sync = datetime.now().strftime("%H:%M:%S")
+        st.session_state["sync_notif"] = (
+            f"🔄 Attribution mise à jour à {heure_sync} : Conducteur 1"
+            f" ({len(nouveaux_c1)} chantier(s)), Conducteur 2"
+            f" ({len(nouveaux_c2)} chantier(s))."
+        )
+        st.rerun()
+
+    # MODULE 2 : COMPOSITION DE L'ÉQUIPE FIXE D'UN CHANTIER
+    elif sous_menu_admin == "⚡ Fixer l'équipe d'un Chantier":
+      st.markdown("#### Définir l'équipe autorisée sur un chantier")
       ch_cible = st.selectbox(
           "Chantier à configurer",
           [c for c in LISTE_CHANTIERS if c != "EN ATTENTE / DEPOT"],
@@ -504,7 +607,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
       )
 
       if st.button(
-          f"💾 Enregistrer & Verrouiller l'équipe de {ch_cible}",
+          f"💾 Verrouiller l'équipe de {ch_cible}",
           type="primary",
           use_container_width=True,
       ):
@@ -535,6 +638,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         )
         st.rerun()
 
+    # MODULE 3 : TRANSFERT INDIVIDUEL
     elif sous_menu_admin == "🔄 Transférer un ouvrier individuel":
       st.markdown("#### Déplacer un ouvrier vers un autre chantier")
       df_w_admin = get_workers_df()
@@ -575,6 +679,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         )
         st.rerun()
 
+    # MODULE 4 : VUE GÉNÉRALE
     elif sous_menu_admin == "📋 Vue générale des équipes":
       st.markdown("#### Répartition actuelle des ouvriers")
       df_w_admin = get_workers_df()
@@ -595,6 +700,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           hide_index=True,
       )
 
+    # MODULE 5 : PHOTOS
     elif sous_menu_admin == "👤 Profils & Gestion des Photos":
       st.markdown("#### Portraits des ouvriers")
       ouvrier_photo = st.selectbox(
@@ -626,10 +732,8 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           )
           st.rerun()
 
-    elif (
-        sous_menu_admin
-        == "📊 Historique des Pointages (avec Conducteur)"
-    ):
+    # MODULE 6 : HISTORIQUE
+    elif sous_menu_admin == "📊 Historique des Pointages":
       st.markdown("#### Registre des Saisies avec Conducteur de Travaux")
       conn = get_db_connection()
       query = """
