@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from datetime import date
+from datetime import date, datetime
 import pandas as pd
 from PIL import Image
 import streamlit as st
@@ -12,8 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Chemin fixe de la base SQLite
-DB_PATH = "chantier_gestion_directe_v27.db"
+DB_PATH = "chantier_gestion_directe_v28.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -141,7 +140,6 @@ init_database()
 
 
 def get_workers_df():
-  # Lecture directe à chaque appel sans mise en cache
   conn = get_db_connection()
   df = pd.read_sql_query(
       "SELECT id, nom, chantier_fixe FROM workers ORDER BY nom ASC", conn
@@ -159,7 +157,13 @@ def get_photo_path(nom_ouvrier):
   return None
 
 
-# --- MENU PRINCIPAL ---
+# --- GESTION DES NOTIFICATIONS DE SYNCHRONISATION ---
+if "sync_notif" not in st.session_state:
+  st.session_state["sync_notif"] = None
+
+if st.session_state["sync_notif"]:
+  st.success(st.session_state["sync_notif"])
+
 st.title("🏗️ Suivi de Chantier & Étanchéité")
 menu_general = st.radio(
     "Navigation",
@@ -168,7 +172,7 @@ menu_general = st.radio(
 )
 
 # ==============================================================================
-# 1. ESPACE TERRAIN : SAISIE DU JOUR (SYNCHRONISATION EN DIRECT)
+# 1. ESPACE TERRAIN : SAISIE DU JOUR
 # ==============================================================================
 if menu_general == "⚡ Saisie du Jour (Chantier)":
   st.subheader("Pointage & Rendement Journalier")
@@ -183,20 +187,18 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
   with col_dt:
     date_choisie = st.date_input("📅 Date", value=date.today())
 
-  # Lecture fraîche directe depuis la base
   df_w = get_workers_df()
   equipe_active = df_w[df_w["chantier_fixe"] == chantier_choisi]
 
   st.markdown(
-      f"#### 👷 Équipe affectée à **{chantier_choisi}** ({len(equipe_active)}"
-      " ouvrier(s))"
+      f"#### 👷 Équipe active sur **{chantier_choisi}** : `{len(equipe_active)}`"
+      " ouvrier(s)"
   )
 
   if equipe_active.empty:
     st.warning(
-        f"Aucun ouvrier n'est actuellement affecté au chantier"
-        f" {chantier_choisi}.\n\nAllez dans le **Panneau d'Administration** pour"
-        " composer l'équipe de ce chantier."
+        f"⚠️ Aucun ouvrier n'est affecté à {chantier_choisi}.\n\nAllez dans le"
+        " Panneau d'Administration pour composer l'équipe."
     )
   else:
     donnees_ouvriers = {}
@@ -236,7 +238,6 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
       apprec_val = "-"
       obs_val = ""
 
-      # Si l'ouvrier est présent ou en demi-journée
       if "Présent" in st_val or "1/2" in st_val:
         col_t1, col_t2 = st.columns(2)
         with col_t1:
@@ -256,7 +257,6 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
               key=f"typ_{w_id}",
           )
 
-        # Si métrage : afficher le champ numérique
         if type_travail == "Métrage (m² / ml)":
           col_r1, col_r2, col_r3 = st.columns([1.5, 1.5, 2])
           with col_r1:
@@ -284,7 +284,6 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
                 placeholder="Ex: terrasse sud, relevés...",
                 key=f"obs_{w_id}",
             )
-        # Si Bricolage : masquer le champ métrage
         else:
           unite_val = "Sans métrage"
           qte_val = 1.0
@@ -302,10 +301,9 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
           with col_b2:
             obs_val = st.text_input(
                 "Détail du bricolage",
-                placeholder="Ex: réparation solin, regard, finitions...",
+                placeholder="Ex: étanchéité regard, solin, finitions...",
                 key=f"obs_br_{w_id}",
             )
-      # Si absent : tout le bloc production disparaît
       else:
         obs_val = st.text_input(
             "Motif / Observation de l'absence",
@@ -383,10 +381,13 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
 
       conn.commit()
       conn.close()
-      st.success(
-          f"Pointage et rendements enregistrés avec succès pour"
-          f" {chantier_choisi} !"
+
+      heure_validation = datetime.now().strftime("%H:%M:%S")
+      st.session_state["sync_notif"] = (
+          f"✅ Journée validée avec succès pour {chantier_choisi} à"
+          f" {heure_validation} ({len(donnees_ouvriers)} ouvriers enregistrés) !"
       )
+      st.rerun()
 
 # ==============================================================================
 # 2. PANNEAU D'ADMINISTRATION
@@ -433,7 +434,7 @@ elif menu_general == "🔐 Panneau d'Administration":
 
     st.markdown("---")
 
-    # 1. COMPOSITION D'ÉQUIPE PAR CHANTIER (ÉCRASE ET TRANSFÈRE DIRECTEMENT)
+    # 1. COMPOSITION D'ÉQUIPE PAR CHANTIER
     if (
         sous_menu_admin
         == "⚡ Composer l'équipe d'un Chantier (Mise à jour directe)"
@@ -450,14 +451,13 @@ elif menu_general == "🔐 Panneau d'Administration":
           key="adm_ch_cible",
       )
 
-      # Relecture fraîche directe
       df_w_admin = get_workers_df()
       actuels = df_w_admin[df_w_admin["chantier_fixe"] == ch_cible][
           "nom"
       ].tolist()
 
       nouveaux_membres = st.multiselect(
-          f"Ouvriers travaillant sur {ch_cible} :",
+          f"Ouvriers affectés à {ch_cible} :",
           options=EFFECTIF_GLOBAL,
           default=actuels,
           key=f"ms_{ch_cible}",
@@ -471,7 +471,6 @@ elif menu_general == "🔐 Panneau d'Administration":
         conn = get_db_connection()
         c = conn.cursor()
 
-        # 1. Les anciens qui ont été décochés vont dans le dépôt d'attente
         for nom in actuels:
           if nom not in nouveaux_membres:
             c.execute(
@@ -480,7 +479,6 @@ elif menu_general == "🔐 Panneau d'Administration":
                 (nom,),
             )
 
-        # 2. Les cochés sont affectés à ce chantier (ce qui les retire automatiquement de partout ailleurs)
         for nom in nouveaux_membres:
           c.execute(
               "UPDATE workers SET chantier_fixe = ? WHERE nom = ?",
@@ -490,9 +488,11 @@ elif menu_general == "🔐 Panneau d'Administration":
         conn.commit()
         conn.close()
 
-        st.success(
-            f"✅ Synchronisation réussie ! {len(nouveaux_membres)} ouvrier(s)"
-            f" affecté(s) à {ch_cible}."
+        heure_sync = datetime.now().strftime("%H:%M:%S")
+        st.session_state["sync_notif"] = (
+            f"🔄 Synchronisation réussie à {heure_sync} : {len(nouveaux_membres)}"
+            f" ouvrier(s) affecté(s) à {ch_cible} (Anciens chantiers libérés"
+            " automatiquement)."
         )
         st.rerun()
 
@@ -531,7 +531,12 @@ elif menu_general == "🔐 Panneau d'Administration":
         )
         conn.commit()
         conn.close()
-        st.success(f"✅ {ouvrier_sel} transféré vers {dest_ch} avec succès !")
+
+        heure_sync = datetime.now().strftime("%H:%M:%S")
+        st.session_state["sync_notif"] = (
+            f"🔄 Transfert synchronisé à {heure_sync} : {ouvrier_sel} déplacé"
+            f" de {ancien_ch} ➔ {dest_ch}."
+        )
         st.rerun()
 
     # 3. LISTE GLOBALE
@@ -587,7 +592,9 @@ elif menu_general == "🔐 Panneau d'Administration":
           nom_fichier = f"{ouvrier_photo.replace(' ', '_')}.{ext}"
           chemin_save = os.path.join(PHOTOS_DIR, nom_fichier)
           image_obj.save(chemin_save)
-          st.success(f"Photo enregistrée pour {ouvrier_photo} !")
+          st.session_state["sync_notif"] = (
+              f"📸 Photo synchronisée pour {ouvrier_photo} !"
+          )
           st.rerun()
 
     # 5. HISTORIQUE
