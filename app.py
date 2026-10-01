@@ -4,6 +4,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+# Configuration de l'affichage mobile
 st.set_page_config(
     page_title="Suivi Chantier Étanchéité",
     page_icon="🏗️",
@@ -11,8 +12,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_tracker_v7.db")
+DB_PATH = os.path.join("/tmp", "chantier_tracker_v8.db")
 
+# Liste des 14 chantiers
 LISTE_CHANTIERS = [
     "CAC-31-24",
     "CMA-09-23",
@@ -30,6 +32,7 @@ LISTE_CHANTIERS = [
     "ESC-16-24",
 ]
 
+# Corps d'état & Tâches
 LISTE_CORPS_ETAT = [
     "PAX",
     "PARE-VAPEUR",
@@ -66,13 +69,9 @@ LISTE_CORPS_ETAT = [
     "BRICOL PARE-VAPEUR",
     "BRICOL Cheminée",
     "DIVERS",
-    "CONGÉ",
-    "MALADIE",
-    "RECUPERATION",
-    "1/2 journée",
-    "Absence autorisée",
 ]
 
+# Effectif complet des 23 ouvriers
 EFFECTIF_GLOBAL = [
     "ADDA Abbess",
     "MEKHACHEF DJAMEL",
@@ -126,18 +125,6 @@ def init_database():
             FOREIGN KEY(worker_id) REFERENCES workers(id)
         )
     """)
-  c.execute("""
-        CREATE TABLE IF NOT EXISTS consommation_soir (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date_jour TEXT,
-            chantier TEXT,
-            rouleaux_pax REAL,
-            primaire REAL,
-            gaz REAL,
-            elastotek REAL,
-            remarque TEXT
-        )
-    """)
   for w in EFFECTIF_GLOBAL:
     c.execute(
         "INSERT OR IGNORE INTO workers (nom, fonction) VALUES (?, ?)",
@@ -170,7 +157,7 @@ def get_rapports():
             r.chantier AS Chantier,
             w.nom AS Ouvrier,
             r.statut AS Statut,
-            r.corps_etat AS [Corps d'État],
+            r.corps_etat AS [Corps d'État / Motif],
             CASE 
                 WHEN r.statut LIKE '%Absence autorisée%' THEN 'Excusé'
                 WHEN r.statut LIKE '%Injustifiée%' THEN 'Non justifié'
@@ -196,7 +183,7 @@ def get_rapports():
           "Chantier",
           "Ouvrier",
           "Statut",
-          "Corps d'État",
+          "Corps d'État / Motif",
           "Production",
           "Observation",
           "Qualite",
@@ -205,57 +192,19 @@ def get_rapports():
   )
 
 
-def get_consommations():
-  init_database()
-  conn = sqlite3.connect(DB_PATH)
-  c = conn.cursor()
-  c.execute("""
-        SELECT 
-            date_jour AS Date,
-            chantier AS Chantier,
-            rouleaux_pax AS [Rouleaux PAX],
-            primaire AS [Primaire (L/Fût)],
-            gaz AS [Gaz (Btl)],
-            elastotek AS [Élastotek (Kg/Seau)],
-            COALESCE(remarque, '-') AS Remarque
-        FROM consommation_soir
-        ORDER BY id DESC
-    """)
-  rows = c.fetchall()
-  conn.close()
-  return pd.DataFrame(
-      rows,
-      columns=[
-          "Date",
-          "Chantier",
-          "Rouleaux PAX",
-          "Primaire (L/Fût)",
-          "Gaz (Btl)",
-          "Élastotek (Kg/Seau)",
-          "Remarque",
-      ],
-  )
-
-
-# --- INTERFACE ---
-st.title("🏗️ Suivi Chantier & Étanchéité")
+# --- INTERFACE PRINCIPALE ---
+st.title("🏗️ Suivi Chantier Étanchéité")
 onglet = st.radio(
-    "Menu",
-    [
-        "Saisie Ouvrier",
-        "Bilan Matériaux (Soir)",
-        "Tableau de Bord",
-    ],
-    horizontal=True,
+    "Menu", ["Saisie Chantier", "Tableau de Bord"], horizontal=True
 )
 
-# 1. SAISIE JOURNALIÈRE DES OUVRIERS
-if onglet == "Saisie Ouvrier":
-  st.subheader("Pointage & Rendement Ouvrier")
+# 1. SAISIE DU CHANTIER
+if onglet == "Saisie Chantier":
+  st.subheader("Pointage & Rendement")
   df_w = get_workers()
   ouvriers_dict = dict(zip(df_w["nom"], df_w["id"]))
 
-  with st.form("form_saisie_ouvrier", clear_on_submit=True):
+  with st.form("form_saisie", clear_on_submit=True):
     col_a, col_b = st.columns(2)
     with col_a:
       chantier = st.selectbox("📍 Chantier", LISTE_CHANTIERS)
@@ -327,11 +276,11 @@ if onglet == "Saisie Ouvrier":
       )
 
     observation = st.text_input(
-        "📝 Remarque / Observation",
-        placeholder="Ex: travail en acrotère, retard, etc.",
+        "📝 Remarque / Observation libre",
+        placeholder="Ex: détails bricol, retards, météo, etc.",
     )
 
-    btn_valider = st.form_submit_button("Enregistrer la saisie ouvrier")
+    btn_valider = st.form_submit_button("Enregistrer la saisie")
 
     if btn_valider:
       if statut == "Absence autorisée / Justifiée":
@@ -384,117 +333,37 @@ if onglet == "Saisie Ouvrier":
       conn.close()
       st.success(f"Enregistré pour {nom_ouvrier} sur {chantier} !")
 
-# 2. BILAN CONSOMMATION DU SOIR (PAR CHANTIER)
-elif onglet == "Bilan Matériaux (Soir)":
-  st.subheader("📦 Consommation Journalière du Soir")
-  st.caption(
-      "Enregistrez ici les quantités totales utilisées sur le chantier durant"
-      " la journée."
-  )
-
-  with st.form("form_conso_soir", clear_on_submit=True):
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-      c_chantier = st.selectbox("📍 Chantier", LISTE_CHANTIERS)
-    with col_c2:
-      c_date = st.date_input("📅 Date de consommation", value=date.today())
-
-    st.markdown("---")
-    m1, m2 = st.columns(2)
-    with m1:
-      conso_pax = st.number_input(
-          "Rouleaux PAX / Bitume posés", min_value=0.0, step=0.5, value=0.0
-      )
-      conso_prim = st.number_input(
-          "Primaire / Vernis (L ou Fûts)", min_value=0.0, step=0.5, value=0.0
-      )
-    with m2:
-      conso_gaz = st.number_input(
-          "Gaz brûlé (Bouteilles)", min_value=0.0, step=0.25, value=0.0
-      )
-      conso_elasto = st.number_input(
-          "Élastotek consommé (Kg/Seaux)", min_value=0.0, step=0.5, value=0.0
-      )
-
-    c_remarque = st.text_input(
-        "📝 Remarque stock (ex: stock restant faible, réapprovisionnement"
-        " nécessaire)"
-    )
-
-    btn_conso = st.form_submit_button("Enregistrer le bilan matière du soir")
-    if btn_conso:
-      conn = sqlite3.connect(DB_PATH)
-      c = conn.cursor()
-      c.execute(
-          """
-                INSERT INTO consommation_soir 
-                (date_jour, chantier, rouleaux_pax, primaire, gaz, elastotek, remarque)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-          (
-              str(c_date),
-              c_chantier,
-              conso_pax,
-              conso_prim,
-              conso_gaz,
-              conso_elasto,
-              c_remarque,
-          ),
-      )
-      conn.commit()
-      conn.close()
-      st.success(
-          f"Bilan matériaux enregistré pour {c_chantier} le {str(c_date)} !"
-      )
-
-# 3. TABLEAU DE BORD GLOBAL
+# 2. TABLEAU DE BORD
 elif onglet == "Tableau de Bord":
-  st.subheader("Synthèse Globale du Chantier")
+  st.subheader("Synthèse de l'Activité")
   df_r = get_rapports()
-  df_c = get_consommations()
 
-  filtre_chantier = st.selectbox(
-      "Filtrer par Chantier", ["Tous"] + LISTE_CHANTIERS
-  )
-
-  df_affiche_r = df_r.copy()
-  df_affiche_c = df_c.copy()
-
-  if filtre_chantier != "Tous":
-    if not df_affiche_r.empty:
-      df_affiche_r = df_affiche_r[df_affiche_r["Chantier"] == filtre_chantier]
-    if not df_affiche_c.empty:
-      df_affiche_c = df_affiche_c[df_affiche_c["Chantier"] == filtre_chantier]
-
-  # Cartes des consommations enregistrées le soir
-  st.markdown("#### 📦 Matériaux consommés (Bilan du soir)")
-  if not df_affiche_c.empty:
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
-      st.metric(
-          label="Rouleaux PAX",
-          value=f"{round(df_affiche_c['Rouleaux PAX'].sum(), 1)} U",
-      )
-    with k2:
-      st.metric(
-          label="Primaire",
-          value=f"{round(df_affiche_c['Primaire (L/Fût)'].sum(), 1)}",
-      )
-    with k3:
-      st.metric(
-          label="Gaz", value=f"{round(df_affiche_c['Gaz (Btl)'].sum(), 1)} Btl"
-      )
-    with k4:
-      st.metric(
-          label="Élastotek",
-          value=f"{round(df_affiche_c['Élastotek (Kg/Seau)'].sum(), 1)}",
-      )
+  if df_r.empty:
+    st.info("Aucune saisie enregistrée pour le moment.")
   else:
-    st.info("Aucun bilan matière du soir enregistré pour cette sélection.")
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+      filtre_chantier = st.selectbox(
+          "Filtrer par Chantier", ["Tous"] + LISTE_CHANTIERS
+      )
+    with col_f2:
+      filtre_ouvrier = st.selectbox(
+          "Filtrer par Ouvrier", ["Tous"] + list(EFFECTIF_GLOBAL)
+      )
 
-  st.markdown("---")
-  st.markdown("#### 👷 Suivi des Ouvriers & Rendements")
-  if not df_affiche_r.empty:
-    st.dataframe(df_affiche_r, use_container_width=True, hide_index=True)
-  else:
-    st.info("Aucune saisie ouvrier enregistrée pour cette sélection.")
+    df_affiche = df_r.copy()
+    if filtre_chantier != "Tous":
+      df_affiche = df_affiche[df_affiche["Chantier"] == filtre_chantier]
+    if filtre_ouvrier != "Tous":
+      df_affiche = df_affiche[df_affiche["Ouvrier"] == filtre_ouvrier]
+
+    st.dataframe(df_affiche, use_container_width=True, hide_index=True)
+
+    csv = df_affiche.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "📥 Exporter cette sélection (CSV)",
+        data=csv,
+        file_name="rapport_chantiers_etancheite.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
