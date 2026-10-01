@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_equipe_globale_v16.db")
+DB_PATH = os.path.join("/tmp", "chantier_equipe_globale_v17.db")
 
 LISTE_CHANTIERS = [
     "CAC-31-24",
@@ -139,7 +139,7 @@ def get_workers_df():
 
 
 # --- APPLICATION ---
-st.title("🏗️️ Suivi de Chantier & Étanchéité")
+st.title("🏗️ Suivi de Chantier & Étanchéité")
 menu = st.radio(
     "Navigation",
     [
@@ -170,7 +170,7 @@ if menu == "⚡ Saisie Chantier":
     )
   else:
     with st.form("form_pointage_global", clear_on_submit=False):
-      st.markdown("#### 📦 Production globale du chantier (pour l'équipe)")
+      st.markdown("#### 📦 Production globale du chantier")
 
       c_tch, c_typ = st.columns(2)
       with c_tch:
@@ -199,8 +199,8 @@ if menu == "⚡ Saisie Chantier":
         metrage_total = 1.0
 
       obs_chantier = st.text_input(
-          "📝 Observation globale (Localisation terrasse, détails techniques...)",
-          placeholder="Optionnel",
+          "📝 Observation globale du chantier",
+          placeholder="Ex: terrasse sud, détails techniques, intempéries...",
       )
 
       st.markdown("---")
@@ -213,10 +213,10 @@ if menu == "⚡ Saisie Chantier":
 
         c_nom, c_st, c_app = st.columns([1.5, 1.5, 1.5])
         with c_nom:
-          st.write(f"**{w_nom}**")
+          st.write(f"👷 **{w_nom}**")
         with c_st:
           st_val = st.selectbox(
-              f"Statut {w_nom}",
+              "Statut",
               [
                   "Présent (Journée)",
                   "1/2 journée",
@@ -229,7 +229,7 @@ if menu == "⚡ Saisie Chantier":
         with c_app:
           if "Présent" in st_val or "1/2" in st_val:
             app_val = st.selectbox(
-                f"Qualité {w_nom}",
+                "Qualité d'exécution",
                 [
                     "🟢 Conforme / Soigné",
                     "🟡 Moyen / Acceptable",
@@ -257,18 +257,10 @@ if menu == "⚡ Saisie Chantier":
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
-        # Nombre de présents pour répartir la productivité
-        nb_presents = sum(
-            1
-            for d in donnees_ouvriers.values()
-            if "Présent" in d["statut"] or "1/2" in d["statut"]
-        )
-
         for w_id, d in donnees_ouvriers.items():
           st_val = d["statut"]
           app = d["appreciation"]
 
-          # Calcul du score individuel
           if "Présent" in st_val:
             base_p = 40.0
             pts_prod = 40.0
@@ -338,7 +330,7 @@ elif menu == "⚙️ Affectations Fixes":
             else 0
         )
         nouvelles_affectations[row["id"]] = st.selectbox(
-            f"Chantier fixe de {row['nom']}",
+            "Chantier fixe",
             LISTE_CHANTIERS,
             index=idx,
             key=f"ch_fix_{row['id']}",
