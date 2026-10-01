@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_roles_v41.db"
+DB_PATH = "chantier_roles_v42.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -156,15 +156,12 @@ def init_database():
         )
     """)
 
-  # Insertion initiale des chantiers
   for ch in LISTE_CHANTIERS_INIT:
     c.execute("INSERT OR IGNORE INTO chantiers_ref (nom) VALUES (?)", (ch,))
 
-  # Insertion initiale des tâches / corps d'état
   for tch in LISTE_TACHES_INIT:
     c.execute("INSERT OR IGNORE INTO taches_ref (nom) VALUES (?)", (tch,))
 
-  # Conducteurs
   c.execute(
       "INSERT OR IGNORE INTO conducteurs_meta (tag, nom_affiche) VALUES ('c1',"
       " 'Conducteur 1')"
@@ -174,7 +171,6 @@ def init_database():
       " 'Conducteur 2')"
   )
 
-  # Effectif initial
   for w in EFFECTIF_GLOBAL_INIT:
     c.execute(
         "INSERT OR IGNORE INTO workers (nom, chantier_fixe) VALUES (?, ?)",
@@ -264,7 +260,7 @@ if "sync_notif" not in st.session_state:
 if st.session_state["sync_notif"]:
   st.success(st.session_state["sync_notif"])
 
-st.title("🏗️ Suivi de Chantier & Étanchéité")
+st.title("🏗️️ Suivi de Chantier & Étanchéité")
 
 dict_conducteurs = get_conducteurs_dict()
 nom_c1 = dict_conducteurs.get("c1", "Conducteur 1")
@@ -544,7 +540,7 @@ elif menu_general == f"👷 Espace {nom_c2}":
   interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# 2. ESPACE ADMIN (AVEC GESTION DES CHANTIERS & CORPS D'ÉTAT)
+# 2. ESPACE ADMIN (AVEC MODIFICATION DES RAPPORTS CONDUCTEURS)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
   st.subheader("Accès Sécurisé - Administration")
@@ -609,7 +605,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         (
             "mod_rapport",
             "📊 Registre & Rapports",
-            "Consulter et exporter les données saisies par conducteur",
+            "Consulter, modifier ou corriger les données saisies par conducteur",
         ),
     ]
 
@@ -671,26 +667,24 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
       st.markdown("---")
 
-      # 1. NOUVEAU MODULE : GESTION DES CHANTIERS & CORPS D'ÉTAT (TACHES)
+      # 1. MODULE : GESTION DES CHANTIERS & CORPS D'ÉTAT
       if mod_actuel == "mod_chantiers_taches":
         st.markdown(
             "### 🏗️ Gestion des Chantiers & Corps d'état (Tâches / Activités)"
         )
         st.caption(
-            "Toute modification, ajout ou suppression est enregistrée en base"
-            " de données et synchronisée en temps réel pour tous les"
-            " conducteurs."
+            "Toute modification, ajout ou suppression est synchronisée en temps"
+            " réel pour tous les conducteurs."
         )
 
         tab_ch, tab_tch = st.tabs(
             ["📍 Gestion des Chantiers", "🔨 Gestion des Corps d'état (Tâches)"]
         )
 
-        # GESTION DES CHANTIERS
         with tab_ch:
           liste_actuelle_ch = get_all_chantiers()
           sub_ch1, sub_ch2, sub_ch3 = st.tabs(
-              ["➕ Nouveau Chantier", "✏️ Modifier un Chantier", "🗑️ Supprimer"]
+              ["➕ Nouveau Chantier", "✏️ Modifier un Chantier", "🗑️️ Supprimer"]
           )
 
           with sub_ch1:
@@ -797,7 +791,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
               )
               st.rerun()
 
-        # GESTION DES TACHES / CORPS D'ÉTAT
         with tab_tch:
           liste_actuelle_tch = get_all_taches()
           sub_t1, sub_t2, sub_t3 = st.tabs(
@@ -998,10 +991,10 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             with col_oi:
               nouveau_nom_ouv = st.text_input(
-                  "Nom complet de l'ouvrier :",
-                  value=ouvrier_sel,
-                  key=f"edit_nom_w_{ouvrier_sel}",
-              )
+                "Nom complet de l'ouvrier :",
+                value=ouvrier_sel,
+                key=f"edit_nom_w_{ouvrier_sel}",
+            )
               nouvelle_photo_ouv = st.file_uploader(
                   "Photo de l'ouvrier (Galerie ou Fichier)",
                   type=["jpg", "jpeg", "png"],
@@ -1307,74 +1300,286 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           )
           st.rerun()
 
-      # 6. MODULE REGISTRE & RAPPORT
+      # 6. MODULE REGISTRE, RAPPORTS & CORRECTIONS DES SAISIES
       elif mod_actuel == "mod_rapport":
-        st.markdown("### 📊 Registre & Rapport Complet des Pointages")
+        st.markdown("### 📊 Registre & Gestion des Saisies Conducteurs")
+        st.caption(
+            "Consultez les saisies, exportez les rapports ou corrigez les"
+            " erreurs commises par les conducteurs."
+        )
+
+        tab_reg, tab_corr = st.tabs(
+            ["📋 Registre & Consultation", "✏️ Corriger un Pointage (Admin)"]
+        )
+
         conn = get_db_connection()
-        query = """
+        query_admin = """
                 SELECT 
+                    p.id AS ID,
                     p.date_jour AS [Date],
                     p.chantier AS [Chantier],
                     p.conducteur AS [Conducteur],
                     w.nom AS [Ouvrier],
                     p.statut AS [Statut],
                     p.tache AS [Tâche],
-                    CASE 
-                        WHEN p.unite = 'Sans métrage' THEN 'Bricol'
-                        WHEN p.quantite > 0 THEN p.quantite || ' ' || p.unite 
-                        ELSE '-'
-                    END AS [Production],
+                    p.quantite AS [Quantite],
+                    p.unite AS [Unite],
                     COALESCE(p.appreciation, '-') AS [Qualité],
                     COALESCE(p.observation, '-') AS [Observation],
-                    CASE 
-                        WHEN p.score IS NULL THEN 'Justifié'
-                        ELSE CAST(p.score AS TEXT)
-                    END AS [Score]
+                    p.score AS [Score]
                 FROM pointages p
                 JOIN workers w ON p.worker_id = w.id
                 ORDER BY p.date_jour DESC, p.chantier ASC, w.nom ASC
             """
-        df_hist = pd.read_sql_query(query, conn)
+        df_all_pointages = pd.read_sql_query(query_admin, conn)
         conn.close()
 
-        if df_hist.empty:
-          st.info("Aucune saisie enregistrée dans la base de données.")
-        else:
-          c_f1, c_f2 = st.columns(2)
-          with c_f1:
-            conducteurs_trouves = sorted(
-                df_hist["Conducteur"].dropna().unique().tolist()
+        with tab_reg:
+          if df_all_pointages.empty:
+            st.info("Aucune saisie enregistrée dans la base de données.")
+          else:
+            c_f1, c_f2 = st.columns(2)
+            with c_f1:
+              conds_trouves = sorted(
+                  df_all_pointages["Conducteur"].dropna().unique().tolist()
+              )
+              filtre_cond = st.selectbox(
+                  "Filtrer par Conducteur :",
+                  ["Tous les conducteurs"] + conds_trouves,
+              )
+            with c_f2:
+              ch_trouves = sorted(
+                  df_all_pointages["Chantier"].dropna().unique().tolist()
+              )
+              filtre_ch = st.selectbox(
+                  "Filtrer par Chantier :", ["Tous les chantiers"] + ch_trouves
+              )
+
+            df_filtre = df_all_pointages.copy()
+            if filtre_cond != "Tous les conducteurs":
+              df_filtre = df_filtre[df_filtre["Conducteur"] == filtre_cond]
+            if filtre_ch != "Tous les chantiers":
+              df_filtre = df_filtre[df_filtre["Chantier"] == filtre_ch]
+
+            df_affichage = df_filtre.copy()
+            df_affichage["Production"] = df_affichage.apply(
+                lambda r: "Bricol"
+                if r["Unite"] == "Sans métrage"
+                else (
+                    f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-"
+                ),
+                axis=1,
             )
-            filtre_cond = st.selectbox(
-                "Filtrer par Conducteur :",
-                ["Tous les conducteurs"] + conducteurs_trouves,
-            )
-          with c_f2:
-            chantiers_trouves = sorted(
-                df_hist["Chantier"].dropna().unique().tolist()
-            )
-            filtre_ch = st.selectbox(
-                "Filtrer par Chantier :",
-                ["Tous les chantiers"] + chantiers_trouves,
+            colonnes_vues = [
+                "Date",
+                "Chantier",
+                "Conducteur",
+                "Ouvrier",
+                "Statut",
+                "Tâche",
+                "Production",
+                "Qualité",
+                "Observation",
+                "Score",
+            ]
+
+            st.dataframe(
+                df_affichage[colonnes_vues],
+                use_container_width=True,
+                hide_index=True,
             )
 
-          df_filtre = df_hist.copy()
-          if filtre_cond != "Tous les conducteurs":
-            df_filtre = df_filtre[df_filtre["Conducteur"] == filtre_cond]
-          if filtre_ch != "Tous les chantiers":
-            df_filtre = df_filtre[df_filtre["Chantier"] == filtre_ch]
+            csv = df_affichage[colonnes_vues].to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "📥 Télécharger ce rapport (CSV Excel)",
+                data=csv,
+                file_name=f"rapport_pointage_{date.today()}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
-          st.markdown(
-              f"**Total enregistrements affichés :** `{len(df_filtre)}`"
-              " ligne(s)"
-          )
-          st.dataframe(df_filtre, use_container_width=True, hide_index=True)
+        # SOUS-ONGLET CORRECTION DES ERREURS CONDUCTEURS
+        with tab_corr:
+          st.markdown("##### Rectifier ou supprimer une saisie erronée")
+          if df_all_pointages.empty:
+            st.info("Aucun pointage à corriger pour le moment.")
+          else:
+            # Construction d'un identifiant clair pour chaque ligne
+            df_all_pointages["label"] = df_all_pointages.apply(
+                lambda r: (
+                    f"ID #{r['ID']} | {r['Date']} | {r['Chantier']} |"
+                    f" {r['Ouvrier']} ({r['Conducteur']})"
+                ),
+                axis=1,
+            )
 
-          csv = df_filtre.to_csv(index=False).encode("utf-8")
-          st.download_button(
-              "📥 Télécharger ce rapport (CSV Excel)",
-              data=csv,
-              file_name=f"rapport_pointage_{date.today()}.csv",
-              mime="text/csv",
-              use_container_width=True,
-          )
+            ligne_choisie = st.selectbox(
+                "Sélectionner l'enregistrement à corriger :",
+                df_all_pointages["label"].tolist(),
+                key="sel_pt_correction",
+            )
+
+            row_sel = df_all_pointages[
+                df_all_pointages["label"] == ligne_choisie
+            ].iloc[0]
+            pt_id = int(row_sel["ID"])
+
+            st.info(
+                f"Modification du pointage de **{row_sel['Ouvrier']}** sur"
+                f" **{row_sel['Chantier']}** le **{row_sel['Date']}**"
+                f" (Enregistré par {row_sel['Conducteur']})"
+            )
+
+            col_c1, col_c2 = st.columns(2)
+            with col_c1:
+              statuts_possibles = [
+                  "Présent (Journée)",
+                  "1/2 journée",
+                  "Absence Autorisée (Congé/Maladie)",
+                  "Absence Non Autorisée (Injustifiée)",
+              ]
+              idx_st = (
+                  statuts_possibles.index(row_sel["Statut"])
+                  if row_sel["Statut"] in statuts_possibles
+                  else 0
+              )
+              mod_statut = st.selectbox(
+                  "Statut :",
+                  statuts_possibles,
+                  index=idx_st,
+                  key=f"mod_st_{pt_id}",
+              )
+
+              toutes_les_taches_dispos = get_all_taches()
+              idx_tch = (
+                  toutes_les_taches_dispos.index(row_sel["Tâche"])
+                  if row_sel["Tâche"] in toutes_les_taches_dispos
+                  else 0
+              )
+              mod_tache = st.selectbox(
+                  "Tâche / Corps d'état :",
+                  toutes_les_taches_dispos,
+                  index=idx_tch,
+                  key=f"mod_tch_{pt_id}",
+              )
+
+            with col_c2:
+              type_activite_mod = st.selectbox(
+                  "Type :",
+                  ["Métrage (m² / ml)", "Bricol / Sans métrage"],
+                  index=1 if row_sel["Unite"] == "Sans métrage" else 0,
+                  key=f"mod_typ_{pt_id}",
+              )
+
+              if type_activite_mod == "Métrage (m² / ml)":
+                mod_qte = st.number_input(
+                    "Production :",
+                    min_value=0.0,
+                    step=1.0,
+                    value=float(row_sel["Quantite"]),
+                    key=f"mod_qte_{pt_id}",
+                )
+                mod_unite = "m²"
+              else:
+                mod_qte = 1.0
+                mod_unite = "Sans métrage"
+
+              qualites_possibles = [
+                  "🟢 Conforme / Soigné",
+                  "🟡 Moyen / Acceptable",
+                  "🔴 Non conforme / À reprendre",
+              ]
+              idx_qual = (
+                  qualites_possibles.index(row_sel["Qualité"])
+                  if row_sel["Qualité"] in qualites_possibles
+                  else 0
+              )
+              mod_apprec = st.selectbox(
+                  "Qualité :",
+                  qualites_possibles,
+                  index=idx_qual,
+                  key=f"mod_qual_{pt_id}",
+              )
+
+            mod_obs = st.text_input(
+                "Observation :",
+                value=str(row_sel["Observation"])
+                if row_sel["Observation"] != "-"
+                else "",
+                key=f"mod_obs_{pt_id}",
+            )
+
+            col_btn_mod, col_btn_del = st.columns([2, 1])
+
+            with col_btn_mod:
+              if st.button(
+                  "💾 Sauvegarder la correction",
+                  type="primary",
+                  use_container_width=True,
+              ):
+                # Recalcul du score d'évaluation
+                if "Présent" in mod_statut:
+                  base_p = 40.0
+                  pts_prod = (
+                      40.0
+                      if (mod_unite == "Sans métrage" or mod_qte >= 30)
+                      else (30.0 if mod_qte >= 20 else 15.0)
+                  )
+                  pts_app = (
+                      20.0
+                      if "Conforme" in mod_apprec
+                      else (
+                          10.0
+                          if "Moyen" in mod_apprec
+                          else (0.0 if "Non conforme" in mod_apprec else 10.0)
+                      )
+                  )
+                  score_corr = min(base_p + pts_prod + pts_app, 100.0)
+                elif "1/2" in mod_statut:
+                  score_corr = 35.0
+                elif "Autorisée" in mod_statut:
+                  score_corr = None
+                else:
+                  score_corr = 0.0
+
+                conn = get_db_connection()
+                c = conn.cursor()
+                c.execute(
+                    """
+                                    UPDATE pointages 
+                                    SET statut = ?, tache = ?, quantite = ?, unite = ?, appreciation = ?, observation = ?, score = ?
+                                    WHERE id = ?
+                                """,
+                    (
+                        mod_statut,
+                        mod_tache,
+                        mod_qte,
+                        mod_unite,
+                        mod_apprec,
+                        mod_obs,
+                        score_corr,
+                        pt_id,
+                    ),
+                )
+                conn.commit()
+                conn.close()
+                st.session_state["sync_notif"] = (
+                    f"✅ Pointage #{pt_id} rectifié avec succès !"
+                )
+                st.rerun()
+
+            with col_btn_del:
+              if st.button(
+                  "🗑️ Supprimer ce pointage",
+                  type="secondary",
+                  use_container_width=True,
+              ):
+                conn = get_db_connection()
+                c = conn.cursor()
+                c.execute("DELETE FROM pointages WHERE id = ?", (pt_id,))
+                conn.commit()
+                conn.close()
+                st.session_state["sync_notif"] = (
+                    f"🗑️ Pointage #{pt_id} supprimé du registre."
+                )
+                st.rerun()
