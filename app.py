@@ -1,4 +1,5 @@
 import os
+import io
 import glob
 import sqlite3
 from datetime import date, datetime
@@ -13,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Base de données définitive et permanente
+# Base de données permanente
 DB_PATH = "chantier_master.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
@@ -120,11 +121,9 @@ def init_database():
     conn.commit()
     conn.close()
     
-    # Récupération automatique de tous les anciens enregistrements perdus dans les autres .db
     recuperer_anciennes_donnees()
 
 def recuperer_anciennes_donnees():
-    """Importe automatiquement tous les pointages des anciennes versions de bases de données trouvées"""
     anciennes_bases = glob.glob("chantier_*.db")
     for old_db in anciennes_bases:
         if old_db == DB_PATH:
@@ -209,7 +208,7 @@ def get_photo_path(identifiant):
             return p
     return None
 
-# --- GESTION NOTIFICATIONS PERSISTANTES ---
+# --- NOTIFICATIONS STREAMLIT ---
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
 
@@ -365,7 +364,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             conn.close()
 
             heure_validation = datetime.now().strftime("%H:%M:%S")
-            st.session_state["sync_notif"] = f"✅ Journée enregistrée avec succès par {default_nom} à {heure_validation} pour {chantier_choisi} !"
+            st.session_state["sync_notif"] = f"✅ Journée enregistrée par {default_nom} à {heure_validation} pour {chantier_choisi} !"
             st.rerun()
 
 # ==============================================================================
@@ -407,7 +406,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                 st.session_state["admin_active_module"] = None
                 st.rerun()
 
-        # Compteur global direct pour vérifier que les données sont bien là
         conn = get_db_connection()
         total_p = conn.cursor().execute("SELECT COUNT(*) FROM pointages").fetchone()[0]
         conn.close()
@@ -418,7 +416,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             st.session_state["admin_active_module"] = None
 
         MODULES_ADMIN = [
-            ("mod_rapport", "📊 Registre & Rapports", "Consulter, modifier ou exporter tous les rapports de saisie"),
+            ("mod_rapport", "📊 Registre & Rapports", "Consulter, corriger ou exporter les rapports de saisie"),
             ("mod_chantiers_taches", "🏗️ Chantiers & Corps d'état", "Ajouter, modifier ou supprimer des chantiers et tâches"),
             ("mod_profils", "👥 Profils & Photos", "Gérer les noms et photos des Conducteurs et Ouvriers"),
             ("mod_chantiers_cond", "👷 Chantiers / Conducteurs", "Attribuer les chantiers sous la responsabilité de chacun"),
@@ -426,7 +424,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             ("mod_transfert", "🔄 Transfert d'Ouvrier", "Déplacer un ouvrier vers un autre chantier de façon unique"),
         ]
 
-        # AFFICHAGE DES CASES
         if st.session_state["admin_active_module"] is None:
             st.markdown("### 🎛 Panneau de Contrôle Administrateur")
             st.caption("Cliquez sur une case pour ouvrir le module :")
@@ -459,7 +456,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             st.session_state["admin_active_module"] = tag2
                             st.rerun()
 
-        # DÉROULEMENT DU MODULE CHOISI
         else:
             mod_actuel = st.session_state["admin_active_module"]
 
@@ -469,14 +465,13 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             st.markdown("---")
 
-            # 1. MODULE REGISTRE & RAPPORTS
+            # 1. MODULE REGISTRE & RAPPORTS AVEC EXPORT EXCEL PARFAIT
             if mod_actuel == "mod_rapport":
                 st.markdown("### 📊 Registre & Gestion des Saisies Conducteurs")
                 
-                tab_reg, tab_corr = st.tabs(["📋 Registre & Consultation", "✏️ Corriger un Pointage (Admin)"])
+                tab_reg, tab_corr = st.tabs(["📋 Registre & Consultation", "✏️️ Corriger un Pointage (Admin)"])
 
                 conn = get_db_connection()
-                # Requête ultra sécurisée avec LEFT JOIN pour ne rater aucune ligne
                 query_admin = """
                     SELECT 
                         p.id AS ID,
@@ -501,7 +496,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                 with tab_reg:
                     if df_all_pointages.empty:
                         st.warning("⚠️ Aucune saisie n'a encore été effectuée ou validée dans le registre.")
-                        st.info("💡 Pour enregistrer des lignes : Allez dans l'espace d'un Conducteur, sélectionnez un chantier, et cliquez sur **« 💾 Valider la journée de l'équipe »**.")
                     else:
                         c_f1, c_f2 = st.columns(2)
                         with c_f1:
@@ -527,14 +521,32 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         st.markdown(f"**Nombre d'enregistrements :** `{len(df_affichage)}` ligne(s)")
                         st.dataframe(df_affichage[colonnes_vues], use_container_width=True, hide_index=True)
 
-                        csv = df_affichage[colonnes_vues].to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            "📥 Télécharger ce rapport (CSV Excel)",
-                            data=csv,
-                            file_name=f"rapport_pointage_{date.today()}.csv",
-                            mime="text/csv",
-                            use_container_width=True
-                        )
+                        # EXPORT ULTRA COMPATIBLE EXCEL (Point-virgule et UTF-8 BOM)
+                        csv_propre = df_affichage[colonnes_vues].to_csv(index=False, sep=";", encoding="utf-8-sig")
+
+                        col_dl1, col_dl2 = st.columns(2)
+                        with col_dl1:
+                            st.download_button(
+                                "📥 Télécharger CSV (Excel Français)",
+                                data=csv_propre.encode("utf-8-sig"),
+                                file_name=f"rapport_pointage_{date.today()}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                        with col_dl2:
+                            try:
+                                buffer = io.BytesIO()
+                                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                                    df_affichage[colonnes_vues].to_excel(writer, index=False, sheet_name="Pointages")
+                                st.download_button(
+                                    "📗 Télécharger Fichier Excel (.xlsx)",
+                                    data=buffer.getvalue(),
+                                    file_name=f"rapport_pointage_{date.today()}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+                            except Exception:
+                                st.caption("💡 Pour activer l'export natif .xlsx : installez `openpyxl` (`pip install openpyxl`).")
 
                 with tab_corr:
                     st.markdown("##### Rectifier ou supprimer une saisie erronée")
@@ -633,7 +645,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                 with tab_ch:
                     liste_actuelle_ch = get_all_chantiers()
-                    sub_ch1, sub_ch2, sub_ch3 = st.tabs(["➕ Nouveau Chantier", "✏️ Modifier un Chantier", "🗑️️ Supprimer"])
+                    sub_ch1, sub_ch2, sub_ch3 = st.tabs(["➕ Nouveau Chantier", "✏️ Modifier un Chantier", "🗑 Supprimer"])
 
                     with sub_ch1:
                         nouveau_chantier_nom = st.text_input("Nom du nouveau chantier :", key="in_add_ch")
@@ -842,7 +854,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             chantiers_options = get_all_chantiers()
                             chantier_init = st.selectbox("Chantier initial :", chantiers_options, key="sel_new_worker_ch_tab")
                         with col_add2:
-                            photo_nouvel_ouvrier = st.file_uploader("Photo (Optionnel) :", type=["jpg", "jpeg", "png"], key="upload_new_worker_photo_tab")
+                            photo_nouvel_ouvrier = st.file_uploader("Photo (Optionnel) :", type=["jpg", "jpeg", "png"], key=upload_new_worker_photo_tab)
 
                         if st.button("➕ Ajouter l'ouvrier", type="primary", key="btn_add_worker_tab"):
                             nom_nettoye = nom_nouveau.strip()
