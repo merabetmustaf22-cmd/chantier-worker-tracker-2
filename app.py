@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_roles_v35.db"
+DB_PATH = "chantier_roles_v36.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -70,7 +70,7 @@ LISTE_TACHES = [
     "DIVERS",
 ]
 
-EFFECTIF_GLOBAL = [
+EFFECTIF_GLOBAL_INIT = [
     "ADDA Abbess",
     "MEKHACHEF DJAMEL",
     "MESTEFAOUI AHMED",
@@ -112,6 +112,12 @@ def init_database():
         )
     """)
   c.execute("""
+        CREATE TABLE IF NOT EXISTS conducteurs_meta (
+            tag TEXT PRIMARY KEY,
+            nom_affiche TEXT NOT NULL
+        )
+    """)
+  c.execute("""
         CREATE TABLE IF NOT EXISTS conducteur_chantiers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             conducteur_tag TEXT NOT NULL,
@@ -137,7 +143,18 @@ def init_database():
             FOREIGN KEY(worker_id) REFERENCES workers(id)
         )
     """)
-  for w in EFFECTIF_GLOBAL:
+  # Conducteurs initiaux
+  c.execute(
+      "INSERT OR IGNORE INTO conducteurs_meta (tag, nom_affiche) VALUES ('c1',"
+      " 'Conducteur 1')"
+  )
+  c.execute(
+      "INSERT OR IGNORE INTO conducteurs_meta (tag, nom_affiche) VALUES ('c2',"
+      " 'Conducteur 2')"
+  )
+
+  # Effectif initial
+  for w in EFFECTIF_GLOBAL_INIT:
     c.execute(
         "INSERT OR IGNORE INTO workers (nom, chantier_fixe) VALUES (?, ?)",
         (w, "CAC-31-24"),
@@ -147,6 +164,15 @@ def init_database():
 
 
 init_database()
+
+
+def get_conducteurs_dict():
+  conn = get_db_connection()
+  c = conn.cursor()
+  c.execute("SELECT tag, nom_affiche FROM conducteurs_meta")
+  res = {row[0]: row[1] for row in c.fetchall()}
+  conn.close()
+  return res
 
 
 def get_workers_df():
@@ -192,7 +218,7 @@ def get_photo_path(nom_ouvrier):
   return None
 
 
-# --- GESTION NOTIFICATIONS ---
+# --- GESTION DES NOTIFICATIONS ---
 if "sync_notif" not in st.session_state:
   st.session_state["sync_notif"] = None
 
@@ -201,13 +227,13 @@ if st.session_state["sync_notif"]:
 
 st.title("🏗️ Suivi de Chantier & Étanchéité")
 
+dict_conducteurs = get_conducteurs_dict()
+nom_c1 = dict_conducteurs.get("c1", "Conducteur 1")
+nom_c2 = dict_conducteurs.get("c2", "Conducteur 2")
+
 menu_general = st.radio(
     "Espace de travail",
-    [
-        "👷 Espace Conducteur 1",
-        "👷 Espace Conducteur 2",
-        "🔐 Espace Admin (Direction)",
-    ],
+    [f"👷 Espace {nom_c1}", f"👷 Espace {nom_c2}", "🔐 Espace Admin (Direction)"],
     horizontal=True,
 )
 
@@ -215,7 +241,6 @@ menu_general = st.radio(
 def interface_saisie_conducteur(conducteur_id_tag, default_nom):
   st.subheader(f"Pointage Journalier — {default_nom}")
 
-  # Sélection de la date sans champ de texte inutile
   date_choisie = st.date_input(
       "📅 Date de saisie", value=date.today(), key=f"date_{conducteur_id_tag}"
   )
@@ -224,7 +249,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 
   if not chantiers_autorises:
     st.warning(
-        f"⚠️️ Aucun chantier n'est actuellement attribué à {default_nom}.\n\n"
+        f"⚠️ Aucun chantier n'est actuellement attribué à {default_nom}.\n\n"
         "L'administrateur doit vous affecter vos chantiers dans l'Espace Admin."
     )
     return
@@ -460,14 +485,14 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 # ==============================================================================
 # 1. ESPACES CONDUCTEURS
 # ==============================================================================
-if menu_general == "👷 Espace Conducteur 1":
-  interface_saisie_conducteur("c1", "Conducteur 1")
+if menu_general == f"👷 Espace {nom_c1}":
+  interface_saisie_conducteur("c1", nom_c1)
 
-elif menu_general == "👷 Espace Conducteur 2":
-  interface_saisie_conducteur("c2", "Conducteur 2")
+elif menu_general == f"👷 Espace {nom_c2}":
+  interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# 2. ESPACE ADMIN (GESTION & REGISTRE)
+# 2. ESPACE ADMIN (GESTION TOTALE DES OUVRIERS ET DES CONDUCTEURS)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
   st.subheader("Accès Sécurisé - Administration")
@@ -501,22 +526,21 @@ elif menu_general == "🔐 Espace Admin (Direction)":
     sous_menu_admin = st.selectbox(
         "Module Administrateur",
         [
-            "📊 Registre & Rapport des Pointages (Par Conducteur)",
+            "📊 Registre & Rapport des Pointages",
+            "📝 Modifier / Gérer les Ouvriers",
+            "👤 Modifier les Conducteurs",
             "🏗️ Affecter les Chantiers aux Conducteurs",
             "⚡ Fixer l'équipe d'un Chantier",
             "🔄 Transférer un ouvrier individuel",
             "📋 Vue générale des équipes",
-            "👤 Profils & Gestion des Photos",
+            "📸 Portraits & Profils Photos",
         ],
     )
 
     st.markdown("---")
 
-    # MODULE RAPPORT & REGISTRE
-    if (
-        sous_menu_admin
-        == "📊 Registre & Rapport des Pointages (Par Conducteur)"
-    ):
+    # MODULE 1 : REGISTRE & RAPPORTS
+    if sous_menu_admin == "📊 Registre & Rapport des Pointages":
       st.markdown("#### Registre des Pointages & Responsables de Saisie")
       conn = get_db_connection()
       query = """
@@ -586,7 +610,143 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             use_container_width=True,
         )
 
-    # MODULE ATTRIBUTION DES CHANTIERS
+    # MODULE 2 : GÉRER ET MODIFIER LES INFORMATIONS DES OUVRIERS
+    elif sous_menu_admin == "📝 Modifier / Gérer les Ouvriers":
+      st.markdown("#### Gestion des Informations des Ouvriers")
+      df_w_admin = get_workers_df()
+
+      tab_edit_w, tab_add_w, tab_del_w = st.tabs(
+          ["✏️ Renommer un ouvrier", "➕ Ajouter un ouvrier", "🗑️ Supprimer"]
+      )
+
+      with tab_edit_w:
+        ouvrier_a_editer = st.selectbox(
+            "Sélectionner l'ouvrier à modifier :",
+            df_w_admin["nom"].tolist(),
+            key="sel_ouv_edit",
+        )
+        nouveau_nom_ouv = st.text_input(
+            "Nouveau nom complet :", value=ouvrier_a_editer
+        )
+
+        if st.button("💾 Enregistrer la modification", type="primary"):
+          nouveau_nom_ouv = nouveau_nom_ouv.strip()
+          if nouveau_nom_ouv and nouveau_nom_ouv != ouvrier_a_editer:
+            conn = get_db_connection()
+            c = conn.cursor()
+            try:
+              c.execute(
+                  "UPDATE workers SET nom = ? WHERE nom = ?",
+                  (nouveau_nom_ouv, ouvrier_a_editer),
+              )
+              conn.commit()
+
+              # Renommer la photo si elle existe
+              ancien_clean = ouvrier_a_editer.replace(" ", "_")
+              nouveau_clean = nouveau_nom_ouv.replace(" ", "_")
+              for ext in [".jpg", ".jpeg", ".png"]:
+                old_p = os.path.join(PHOTOS_DIR, f"{ancien_clean}{ext}")
+                new_p = os.path.join(PHOTOS_DIR, f"{nouveau_clean}{ext}")
+                if os.path.exists(old_p):
+                  os.rename(old_p, new_p)
+
+              st.session_state["sync_notif"] = (
+                  f"✅ Ouvrier renommé avec succès : {ouvrier_a_editer} ➔"
+                  f" {nouveau_nom_ouv}"
+              )
+              conn.close()
+              st.rerun()
+            except sqlite3.IntegrityError:
+              conn.close()
+              st.error("Ce nom existe déjà dans la base.")
+
+      with tab_add_w:
+        nom_nouvel_ouvrier = st.text_input(
+            "Nom et prénom du nouvel ouvrier :", placeholder="Ex: BENALI Samir"
+        )
+        chantier_depart = st.selectbox(
+            "Chantier d'affectation initiale :", LISTE_CHANTIERS
+        )
+
+        if st.button("➕ Ajouter à l'effectif"):
+          nom_clean = nom_nouvel_ouvrier.strip()
+          if nom_clean:
+            conn = get_db_connection()
+            c = conn.cursor()
+            try:
+              c.execute(
+                  "INSERT INTO workers (nom, chantier_fixe) VALUES (?, ?)",
+                  (nom_clean, chantier_depart),
+              )
+              conn.commit()
+              conn.close()
+              st.session_state["sync_notif"] = (
+                  f"✅ {nom_clean} a été ajouté à l'effectif !"
+              )
+              st.rerun()
+            except sqlite3.IntegrityError:
+              conn.close()
+              st.error("Cet ouvrier est déjà présent dans la base.")
+
+      with tab_del_w:
+        ouvrier_a_suppr = st.selectbox(
+            "Sélectionner l'ouvrier à supprimer :",
+            df_w_admin["nom"].tolist(),
+            key="sel_ouv_del",
+        )
+        if st.button(
+            f"❌ Supprimer définitivement {ouvrier_a_suppr}", type="secondary"
+        ):
+          conn = get_db_connection()
+          c = conn.cursor()
+          c.execute("DELETE FROM workers WHERE nom = ?", (ouvrier_a_suppr,))
+          conn.commit()
+          conn.close()
+          st.session_state["sync_notif"] = (
+              f"🗑️ {ouvrier_a_suppr} a été retiré de l'effectif."
+          )
+          st.rerun()
+
+    # MODULE 3 : MODIFIER LES INFORMATIONS DES CONDUCTEURS
+    elif sous_menu_admin == "👤 Modifier les Conducteurs":
+      st.markdown("#### Gestion des Profils des Conducteurs")
+      st.caption(
+          "Personnalisez les noms des conducteurs affichés sur les onglets et"
+          " les rapports."
+      )
+
+      col_ed1, col_ed2 = st.columns(2)
+      with col_ed1:
+        st.markdown("##### 👷 Conducteur 1")
+        new_nom_c1 = st.text_input(
+            "Nom affiché du Conducteur 1 :", value=nom_c1
+        )
+
+      with col_ed2:
+        st.markdown("##### 👷 Conducteur 2")
+        new_nom_c2 = st.text_input(
+            "Nom affiché du Conducteur 2 :", value=nom_c2
+        )
+
+      if st.button("💾 Mettre à jour les noms des conducteurs", type="primary"):
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute(
+            "UPDATE conducteurs_meta SET nom_affiche = ? WHERE tag = 'c1'",
+            (new_nom_c1.strip() or "Conducteur 1",),
+        )
+        c.execute(
+            "UPDATE conducteurs_meta SET nom_affiche = ? WHERE tag = 'c2'",
+            (new_nom_c2.strip() or "Conducteur 2",),
+        )
+        conn.commit()
+        conn.close()
+        st.session_state["sync_notif"] = (
+            "✅ Noms des conducteurs mis à jour avec succès !"
+        )
+        st.rerun()
+
+    # MODULE 4 : ATTRIBUTION DES CHANTIERS
     elif sous_menu_admin == "🏗️ Affecter les Chantiers aux Conducteurs":
       st.markdown("#### Attribution des chantiers sous responsabilité")
       st.caption(
@@ -600,7 +760,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
       col_c1, col_c2 = st.columns(2)
       with col_c1:
-        st.markdown("##### 👷 Conducteur 1")
+        st.markdown(f"##### 👷 {nom_c1}")
         actuels_c1 = get_chantiers_conducteur("c1")
         nouveaux_c1 = st.multiselect(
             "Chantiers assignés :",
@@ -610,7 +770,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         )
 
       with col_c2:
-        st.markdown("##### 👷 Conducteur 2")
+        st.markdown(f"##### 👷 {nom_c2}")
         actuels_c2 = get_chantiers_conducteur("c2")
         nouveaux_c2 = st.multiselect(
             "Chantiers assignés :",
@@ -652,13 +812,13 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
         heure_sync = datetime.now().strftime("%H:%M:%S")
         st.session_state["sync_notif"] = (
-            f"🔄 Attribution mise à jour à {heure_sync} : Conducteur 1"
-            f" ({len(nouveaux_c1)} chantier(s)), Conducteur 2"
+            f"🔄 Attribution mise à jour à {heure_sync} : {nom_c1}"
+            f" ({len(nouveaux_c1)} chantier(s)), {nom_c2}"
             f" ({len(nouveaux_c2)} chantier(s))."
         )
         st.rerun()
 
-    # MODULE FIXER EQUIPE CHANTIER
+    # MODULE 5 : FIXER ÉQUIPE PAR CHANTIER
     elif sous_menu_admin == "⚡ Fixer l'équipe d'un Chantier":
       st.markdown("#### Définir l'équipe autorisée sur un chantier")
       ch_cible = st.selectbox(
@@ -668,13 +828,14 @@ elif menu_general == "🔐 Espace Admin (Direction)":
       )
 
       df_w_admin = get_workers_df()
+      tous_les_noms = df_w_admin["nom"].tolist()
       actuels = df_w_admin[df_w_admin["chantier_fixe"] == ch_cible][
           "nom"
       ].tolist()
 
       nouveaux_membres = st.multiselect(
           f"Ouvriers rattachés à {ch_cible} :",
-          options=EFFECTIF_GLOBAL,
+          options=tous_les_noms,
           default=actuels,
           key=f"ms_adm_{ch_cible}",
       )
@@ -711,7 +872,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         )
         st.rerun()
 
-    # MODULE TRANSFERT INDIVIDUEL
+    # MODULE 6 : TRANSFERT INDIVIDUEL
     elif sous_menu_admin == "🔄 Transférer un ouvrier individuel":
       st.markdown("#### Déplacer un ouvrier vers un autre chantier")
       df_w_admin = get_workers_df()
@@ -752,7 +913,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         )
         st.rerun()
 
-    # MODULE VUE GENERALE
+    # MODULE 7 : VUE GÉNÉRALE
     elif sous_menu_admin == "📋 Vue générale des équipes":
       st.markdown("#### Répartition actuelle des ouvriers")
       df_w_admin = get_workers_df()
@@ -773,11 +934,14 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           hide_index=True,
       )
 
-    # MODULE GESTION DES PHOTOS
-    elif sous_menu_admin == "👤 Profils & Gestion des Photos":
+    # MODULE 8 : PHOTOS
+    elif sous_menu_admin == "📸 Portraits & Profils Photos":
       st.markdown("#### Portraits des ouvriers")
+      df_w_admin = get_workers_df()
+      tous_les_noms = df_w_admin["nom"].tolist()
+
       ouvrier_photo = st.selectbox(
-          "Sélectionner l'ouvrier", EFFECTIF_GLOBAL, key="sel_ouv_photo_adm"
+          "Sélectionner l'ouvrier", tous_les_noms, key="sel_ouv_photo_adm"
       )
       photo_actuelle = get_photo_path(ouvrier_photo)
 
