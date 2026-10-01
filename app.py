@@ -396,3 +396,4 @@ elif menu == "📊 Historique & Synthèse":
         mime="text/csv",
         use_container_width=True,
     )
+      
