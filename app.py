@@ -4,17 +4,17 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-# Configuration mobile
+# Configuration de la page
 st.set_page_config(
-    page_title="Suivi Chantier & Étanchéité",
+    page_title="Suivi Chantier Étanchéité",
     page_icon="🏗️",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_tracker.db")
+DB_PATH = os.path.join("/tmp", "chantier_tracker_v2.db")
 
-# Vos 14 Chantiers
+# Liste des 14 Chantiers
 LISTE_CHANTIERS = [
     "CAC-31-24",
     "CMA-09-23",
@@ -32,7 +32,7 @@ LISTE_CHANTIERS = [
     "ESC-16-24",
 ]
 
-# Vos Corps d'état & Tâches
+# Corps d'état & Tâches
 LISTE_CORPS_ETAT = [
     "CONGÉ",
     "MALADIE",
@@ -104,7 +104,7 @@ EFFECTIF_GLOBAL = [
 ]
 
 
-def get_connection():
+def init_database():
   conn = sqlite3.connect(DB_PATH)
   c = conn.cursor()
   c.execute("""
@@ -131,19 +131,22 @@ def get_connection():
             FOREIGN KEY(worker_id) REFERENCES workers(id)
         )
     """)
-  conn.commit()
-
   for w in EFFECTIF_GLOBAL:
     c.execute(
         "INSERT OR IGNORE INTO workers (nom, fonction) VALUES (?, ?)",
         (w, "Applicateur Étanchéité"),
     )
   conn.commit()
-  return conn
+  conn.close()
+
+
+# Initialisation garantie
+init_database()
 
 
 def get_workers():
-  conn = get_connection()
+  init_database()
+  conn = sqlite3.connect(DB_PATH)
   c = conn.cursor()
   c.execute("SELECT id, nom FROM workers ORDER BY nom ASC")
   rows = c.fetchall()
@@ -152,7 +155,8 @@ def get_workers():
 
 
 def get_rapports():
-  conn = get_connection()
+  init_database()
+  conn = sqlite3.connect(DB_PATH)
   c = conn.cursor()
   c.execute("""
         SELECT 
@@ -227,7 +231,6 @@ if onglet == "Saisie Chantier":
     hse = True
 
     if statut != "Absent / Congé / Maladie":
-      # Détection automatique si la tâche commence par BRICOL ou DIVERS
       est_bricol_auto = "BRICOL" in corps_etat.upper() or corps_etat in [
           "DIVERS",
           "nettoyage",
@@ -235,8 +238,7 @@ if onglet == "Saisie Chantier":
           "décapage",
       ]
       sans_metrage = st.checkbox(
-          "🔨 Sans métrage (Bricolage / Finition / Forfait jour)",
-          value=est_bricol_auto,
+          "🔨 Sans métrage (Bricolage / Forfait jour)", value=est_bricol_auto
       )
 
       if not sans_metrage:
@@ -249,14 +251,13 @@ if onglet == "Saisie Chantier":
           unite = st.selectbox("Unité", ["m²", "ml", "Unité", "Fût"])
       else:
         unite = "Sans métrage"
-        quantite = 1.0  # Forfait journée complète ou demi-journée
+        quantite = 1.0
         observation = st.text_input(
-            "Détail du travail / Bricol (ex: reprise chéneau, jointure, etc.)",
-            placeholder="Optionnel",
+            "Détail du travail / Bricol", placeholder="Précisez le travail"
         )
 
       qualite = st.select_slider(
-          "Qualité de finition / Chutes & Propreté",
+          "Qualité / Propreté / Chutes",
           options=[
               "Élevé (Mauvais)",
               "Moyen (Acceptable)",
@@ -264,19 +265,16 @@ if onglet == "Saisie Chantier":
           ],
           value="Faible (Très bien)",
       )
-      hse = st.checkbox("Respect HSE & EPI obligatoires", value=True)
+      hse = st.checkbox("Respect HSE & Port des EPI", value=True)
 
     btn_valider = st.form_submit_button("Enregistrer la saisie")
 
     if btn_valider:
-      # Calcul du score
       if statut == "Absent / Congé / Maladie":
         score = 0.0
       else:
         base_presence = 30.0 if statut == "Présent (Travail)" else 15.0
-
         if unite == "Sans métrage":
-          # Pour un bricol réussi sans métrage, l'assiduité technique est validée
           points_prod = 40.0 if statut == "Présent (Travail)" else 20.0
         else:
           if quantite >= 40:
@@ -294,12 +292,11 @@ if onglet == "Saisie Chantier":
             else (10.0 if qualite == "Moyen (Acceptable)" else 0.0)
         )
         points_hse = 15.0 if hse else 0.0
-
         score = min(
             base_presence + points_prod + points_qualite + points_hse, 100.0
         )
 
-      conn = get_connection()
+      conn = sqlite3.connect(DB_PATH)
       c = conn.cursor()
       c.execute(
           """
@@ -331,7 +328,7 @@ elif onglet == "Tableau de Bord":
   df_r = get_rapports()
 
   if df_r.empty:
-    st.info("Aucune saisie effectuée pour le moment.")
+    st.info("Aucune saisie enregistrée pour le moment.")
   else:
     col_f1, col_f2 = st.columns(2)
     with col_f1:
