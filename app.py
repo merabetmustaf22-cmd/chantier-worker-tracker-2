@@ -2,6 +2,7 @@ import os
 import sqlite3
 from datetime import date
 import pandas as pd
+from PIL import Image
 import streamlit as st
 
 st.set_page_config(
@@ -11,7 +12,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_dynamique_v21.db")
+DB_PATH = os.path.join("/tmp", "chantier_photos_v22.db")
+PHOTOS_DIR = "photos"
+os.makedirs(PHOTOS_DIR, exist_ok=True)
 
 LISTE_CHANTIERS = [
     "CAC-31-24",
@@ -138,19 +141,29 @@ def get_workers_df():
   return df
 
 
-# --- INTERFACE PRINCIPALE ---
+def get_photo_path(nom_ouvrier):
+  nom_clean = nom_ouvrier.replace(" ", "_")
+  for ext in [".jpg", ".jpeg", ".png"]:
+    p = os.path.join(PHOTOS_DIR, f"{nom_clean}{ext}")
+    if os.path.exists(p):
+      return p
+  return None
+
+
+# --- APPLICATION ---
 st.title("🏗️ Suivi de Chantier & Étanchéité")
 menu = st.radio(
     "Navigation",
     [
         "⚡ Saisie par Ouvrier",
         "⚙️ Affectations Fixes",
+        "👤 Profils & Photos",
         "📊 Historique & Synthèse",
     ],
     horizontal=True,
 )
 
-# 1. SAISIE INDIVIDUELLE
+# 1. SAISIE INDIVIDUELLE AVEC PHOTO
 if menu == "⚡ Saisie par Ouvrier":
   st.subheader("Pointage & Rendement Individuel")
 
@@ -176,8 +189,20 @@ if menu == "⚡ Saisie par Ouvrier":
     for _, row in fixes.iterrows():
       w_id = row["id"]
       w_nom = row["nom"]
+      photo_p = get_photo_path(w_nom)
 
-      st.markdown(f"### 👷 {w_nom}")
+      col_av, col_tx = st.columns([1, 4])
+      with col_av:
+        if photo_p:
+          st.image(photo_p, width=70)
+        else:
+          st.markdown(
+              "<div"
+              " style='font-size:45px;line-height:70px;text-align:center;'>👷</div>",
+              unsafe_allow_html=True,
+          )
+      with col_tx:
+        st.markdown(f"### {w_nom}")
 
       st_val = st.selectbox(
           "Statut de présence",
@@ -196,7 +221,6 @@ if menu == "⚡ Saisie par Ouvrier":
       apprec_val = "-"
       obs_val = ""
 
-      # Ouvrier présent ou en demi-journée
       if "Présent" in st_val or "1/2" in st_val:
         col_t1, col_t2 = st.columns(2)
         with col_t1:
@@ -216,7 +240,6 @@ if menu == "⚡ Saisie par Ouvrier":
               key=f"typ_{w_id}",
           )
 
-        # Si l'activité est avec métrage : afficher le champ numérique
         if type_travail == "Métrage (m² / ml)":
           col_r1, col_r2, col_r3 = st.columns([1.5, 1.5, 2])
           with col_r1:
@@ -244,8 +267,6 @@ if menu == "⚡ Saisie par Ouvrier":
                 placeholder="Ex: terrasse sud, relevés...",
                 key=f"obs_{w_id}",
             )
-
-        # Si Bricol / Sans métrage : la case du métrage est masquée
         else:
           unite_val = "Sans métrage"
           qte_val = 1.0
@@ -263,15 +284,13 @@ if menu == "⚡ Saisie par Ouvrier":
           with col_b2:
             obs_val = st.text_input(
                 "Détail du bricolage",
-                placeholder="Ex: réparation solin, traitement regard, finitions...",
+                placeholder="Ex: étanchéité acrotère, solin, finitions...",
                 key=f"obs_br_{w_id}",
             )
-
-      # Si absent : la production complète est masquée
       else:
         obs_val = st.text_input(
             "Motif / Observation de l'absence",
-            placeholder="Ex: congé, arrêt maladie, sans motif...",
+            placeholder="Ex: congé, maladie, absence injustifiée...",
             key=f"obs_abs_{w_id}",
         )
 
@@ -398,7 +417,38 @@ elif menu == "⚙️ Affectations Fixes":
       st.success("Affectations fixes enregistrées avec succès !")
       st.rerun()
 
-# 3. HISTORIQUE & SYNTHESE
+# 3. GESTION DES PHOTOS DE PROFIL
+elif menu == "👤 Profils & Photos":
+  st.subheader("Gestion des Photos des Ouvriers")
+  st.caption("Importez ou prenez en photo un ouvrier pour associer son visage à son profil.")
+
+  ouvrier_photo = st.selectbox("Sélectionner l'ouvrier", EFFECTIF_GLOBAL)
+  photo_actuelle = get_photo_path(ouvrier_photo)
+
+  col_view, col_upload = st.columns([1, 2])
+  with col_view:
+    if photo_actuelle:
+      st.image(photo_actuelle, caption="Photo actuelle", width=130)
+    else:
+      st.info("Aucune photo associée.")
+
+  with col_upload:
+    fichier_photo = st.file_uploader(
+        "Choisir une photo (Galerie ou Fichier)",
+        type=["jpg", "jpeg", "png"],
+        key="upload_worker_photo",
+    )
+    if fichier_photo is not None:
+      image_obj = Image.open(fichier_photo)
+      nom_fichier = (
+          f"{ouvrier_photo.replace(' ', '_')}.{fichier_photo.name.split('.')[-1]}"
+      )
+      chemin_save = os.path.join(PHOTOS_DIR, nom_fichier)
+      image_obj.save(chemin_save)
+      st.success(f"Photo mise à jour pour {ouvrier_photo} !")
+      st.rerun()
+
+# 4. HISTORIQUE & SYNTHESE
 elif menu == "📊 Historique & Synthèse":
   st.subheader("Historique des Saisies & Rendements Individuels")
   conn = sqlite3.connect(DB_PATH)
