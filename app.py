@@ -4,17 +4,16 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-# Configuration mobile
+# Configuration responsive mobile
 st.set_page_config(
-    page_title="Suivi Chantier Étanchéité",
+    page_title="Suivi Chantier & Matériaux",
     page_icon="🏗️",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_tracker_v5.db")
+DB_PATH = os.path.join("/tmp", "chantier_tracker_v6.db")
 
-# 14 Chantiers
 LISTE_CHANTIERS = [
     "CAC-31-24",
     "CMA-09-23",
@@ -32,7 +31,6 @@ LISTE_CHANTIERS = [
     "ESC-16-24",
 ]
 
-# Corps d'état & Motifs
 LISTE_CORPS_ETAT = [
     "PAX",
     "PARE-VAPEUR",
@@ -76,7 +74,6 @@ LISTE_CORPS_ETAT = [
     "Absence autorisée",
 ]
 
-# Effectif de 23 ouvriers
 EFFECTIF_GLOBAL = [
     "ADDA Abbess",
     "MEKHACHEF DJAMEL",
@@ -124,6 +121,10 @@ def init_database():
             corps_etat TEXT,
             quantite REAL,
             unite TEXT,
+            conso_rouleaux REAL,
+            conso_primaire REAL,
+            conso_gaz REAL,
+            conso_elastotek REAL,
             observation TEXT,
             qualite_dechet TEXT,
             score REAL,
@@ -162,13 +163,17 @@ def get_rapports():
             r.chantier AS Chantier,
             w.nom AS Ouvrier,
             r.statut AS Statut,
-            r.corps_etat AS [Corps d'État / Motif],
+            r.corps_etat AS [Corps d'État],
             CASE 
                 WHEN r.statut LIKE '%Absence autorisée%' THEN 'Excusé'
                 WHEN r.statut LIKE '%Injustifiée%' THEN 'Non justifié'
                 WHEN r.unite = 'Sans métrage' THEN 'Bricol / Jour'
                 ELSE r.quantite || ' ' || r.unite 
             END AS Production,
+            r.conso_rouleaux AS [Rouleaux PAX],
+            r.conso_primaire AS [Primaire (L/Fût)],
+            r.conso_gaz AS [Gaz (Btl)],
+            r.conso_elastotek AS [Élastotek (Kg/Seau)],
             COALESCE(r.observation, '-') AS Observation,
             r.qualite_dechet AS Qualite,
             CASE 
@@ -188,8 +193,12 @@ def get_rapports():
           "Chantier",
           "Ouvrier",
           "Statut",
-          "Corps d'État / Motif",
+          "Corps d'État",
           "Production",
+          "Rouleaux PAX",
+          "Primaire (L/Fût)",
+          "Gaz (Btl)",
+          "Élastotek (Kg/Seau)",
           "Observation",
           "Qualite",
           "Score",
@@ -198,14 +207,14 @@ def get_rapports():
 
 
 # --- INTERFACE ---
-st.title("🏗️ Suivi Chantier Étanchéité")
+st.title("🏗️ Suivi Chantier & Matériaux")
 onglet = st.radio(
     "Menu", ["Saisie Chantier", "Tableau de Bord"], horizontal=True
 )
 
 # 1. SAISIE DU CHANTIER
 if onglet == "Saisie Chantier":
-  st.subheader("Rapport Journalier de Pose")
+  st.subheader("Rapport Journalier & Consommation")
   df_w = get_workers()
   ouvriers_dict = dict(zip(df_w["nom"], df_w["id"]))
 
@@ -233,6 +242,10 @@ if onglet == "Saisie Chantier":
     quantite = 0.0
     unite = "m²"
     qualite = "-"
+    c_rouleaux = 0.0
+    c_primaire = 0.0
+    c_gaz = 0.0
+    c_elastotek = 0.0
 
     if "Absence" in statut:
       corps_etat = st.selectbox(
@@ -266,13 +279,33 @@ if onglet == "Saisie Chantier":
               "Production réalisée", min_value=0.0, step=0.5, value=25.0
           )
         with c2:
-          unite = st.selectbox("Unité", ["m²", "ml", "Unité", "Fût"])
+          unite = st.selectbox("Unité", ["m²", "ml", "Unité"])
       else:
         unite = "Sans métrage"
         quantite = 1.0
 
+      st.markdown("##### 📦 Consommation des Matériaux")
+      mc1, mc2 = st.columns(2)
+      with mc1:
+        c_rouleaux = st.number_input(
+            "Rouleaux PAX / Bitume", min_value=0.0, step=0.5, value=0.0
+        )
+        c_primaire = st.number_input(
+            "Primaire / Vernis (L ou Fûts)",
+            min_value=0.0,
+            step=0.5,
+            value=0.0,
+        )
+      with mc2:
+        c_gaz = st.number_input(
+            "Gaz (Bouteilles)", min_value=0.0, step=0.25, value=0.0
+        )
+        c_elastotek = st.number_input(
+            "Élastotek (Kg ou Seaux)", min_value=0.0, step=0.5, value=0.0
+        )
+
       qualite = st.select_slider(
-          "Qualité / Propreté / Chutes",
+          "Qualité / Propreté / Gestion des chutes",
           options=[
               "Élevé (Mauvais)",
               "Moyen (Acceptable)",
@@ -282,20 +315,19 @@ if onglet == "Saisie Chantier":
       )
 
     observation = st.text_input(
-        "📝 Remarque / Observation / Motif",
+        "📝 Remarque / Observation / Stock restant",
         placeholder=(
-            "Ex: autorisation signée, reprise chéneau, arrêt pluie, etc."
+            "Ex: recouvrement 10 cm respecté, manque chalumeau, etc."
         ),
     )
 
     btn_valider = st.form_submit_button("Enregistrer la saisie")
 
     if btn_valider:
-      # Calcul rigoureux du score
       if statut == "Absence autorisée / Justifiée":
-        score = None  # Neutre : non pénalisé
+        score = None
       elif statut == "Absence non autorisée (Injustifiée)":
-        score = 0.0  # Sanction directe
+        score = 0.0
       else:
         base_presence = 40.0 if statut == "Présent (Travail)" else 20.0
         if unite == "Sans métrage":
@@ -322,8 +354,8 @@ if onglet == "Saisie Chantier":
       c.execute(
           """
                 INSERT INTO rapports_journaliers 
-                (date_jour, chantier, worker_id, statut, corps_etat, quantite, unite, observation, qualite_dechet, score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (date_jour, chantier, worker_id, statut, corps_etat, quantite, unite, conso_rouleaux, conso_primaire, conso_gaz, conso_elastotek, observation, qualite_dechet, score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
           (
               str(date_jour),
@@ -333,6 +365,10 @@ if onglet == "Saisie Chantier":
               corps_etat,
               quantite,
               unite,
+              c_rouleaux,
+              c_primaire,
+              c_gaz,
+              c_elastotek,
               observation,
               qualite,
               score,
@@ -340,11 +376,11 @@ if onglet == "Saisie Chantier":
       )
       conn.commit()
       conn.close()
-      st.success(f"Enregistré pour {nom_ouvrier} !")
+      st.success(f"Enregistré pour {nom_ouvrier} sur {chantier} !")
 
 # 2. TABLEAU DE BORD
 elif onglet == "Tableau de Bord":
-  st.subheader("Synthèse de l'Activité")
+  st.subheader("Synthèse de l'Activité & Consommations")
   df_r = get_rapports()
 
   if df_r.empty:
@@ -366,13 +402,38 @@ elif onglet == "Tableau de Bord":
     if filtre_ouvrier != "Tous":
       df_affiche = df_affiche[df_affiche["Ouvrier"] == filtre_ouvrier]
 
+    # Synthèse des totaux consommés
+    st.markdown("#### 📊 Cumul Matériaux de la sélection")
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+      st.metric(
+          label="Total Rouleaux",
+          value=f"{round(df_affiche['Rouleaux PAX'].sum(), 1)} U",
+      )
+    with k2:
+      st.metric(
+          label="Total Primaire",
+          value=f"{round(df_affiche['Primaire (L/Fût)'].sum(), 1)}",
+      )
+    with k3:
+      st.metric(
+          label="Total Gaz",
+          value=f"{round(df_affiche['Gaz (Btl)'].sum(), 1)} Btl",
+      )
+    with k4:
+      st.metric(
+          label="Total Élastotek",
+          value=f"{round(df_affiche['Élastotek (Kg/Seau)'].sum(), 1)}",
+      )
+
+    st.markdown("---")
     st.dataframe(df_affiche, use_container_width=True, hide_index=True)
 
     csv = df_affiche.to_csv(index=False).encode("utf-8")
     st.download_button(
         "📥 Exporter cette sélection (CSV)",
         data=csv,
-        file_name="rapport_chantiers_etancheite.csv",
+        file_name="rapport_consommation_etancheite.csv",
         mime="text/csv",
         use_container_width=True,
     )
