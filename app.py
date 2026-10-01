@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_gestion_etancheite.db")
+DB_PATH = os.path.join("/tmp", "chantier_equipe_globale_v16.db")
 
 LISTE_CHANTIERS = [
     "CAC-31-24",
@@ -108,9 +108,9 @@ def init_database():
             chantier TEXT,
             worker_id INTEGER,
             statut TEXT,
-            tache TEXT,
-            quantite REAL,
-            unite TEXT,
+            tache_globale TEXT,
+            metrage_global REAL,
+            unite_globale TEXT,
             appreciation TEXT,
             observation TEXT,
             score REAL,
@@ -138,8 +138,8 @@ def get_workers_df():
   return df
 
 
-# --- INTERFACE PRINCIPALE ---
-st.title("🏗️ Suivi de Chantier & Étanchéité")
+# --- APPLICATION ---
+st.title("🏗️️ Suivi de Chantier & Étanchéité")
 menu = st.radio(
     "Navigation",
     [
@@ -152,7 +152,7 @@ menu = st.radio(
 
 # 1. SAISIE DU CHANTIER
 if menu == "⚡ Saisie Chantier":
-  st.subheader("Pointage, Tâches & Évaluation Journalière")
+  st.subheader("Pointage de l'Équipe & Production Globale")
 
   col_ch, col_dt = st.columns(2)
   with col_ch:
@@ -163,24 +163,57 @@ if menu == "⚡ Saisie Chantier":
   df_w = get_workers_df()
   fixes = df_w[df_w["chantier_fixe"] == chantier_choisi]
 
-  st.markdown(f"#### 👷 Équipe affectée au site ({len(fixes)} ouvriers)")
-
   if fixes.empty:
     st.warning(
-        f"Aucun ouvrier rattaché au chantier {chantier_choisi}. Veuillez"
-        " configurer l'équipe dans l'onglet '⚙️ Affectations Fixes'."
+        f"Aucun ouvrier rattaché au chantier {chantier_choisi}. Rendez-vous"
+        " dans l'onglet '⚙️ Affectations Fixes'."
     )
   else:
-    with st.form("form_pointage_individuel", clear_on_submit=False):
-      donnees_ouvriers = {}
+    with st.form("form_pointage_global", clear_on_submit=False):
+      st.markdown("#### 📦 Production globale du chantier (pour l'équipe)")
 
+      c_tch, c_typ = st.columns(2)
+      with c_tch:
+        tache_globale = st.selectbox("Tâche réalisée", LISTE_TACHES)
+      with c_typ:
+        type_travail = st.selectbox(
+            "Type d'activité", ["Métrage global", "Bricol / Sans métrage"]
+        )
+
+      metrage_total = 0.0
+      unite_globale = "m²"
+
+      if type_travail == "Métrage global":
+        cq1, cq2 = st.columns(2)
+        with cq1:
+          metrage_total = st.number_input(
+              "Métrage total réalisé par l'équipe",
+              min_value=0.0,
+              step=5.0,
+              value=100.0,
+          )
+        with cq2:
+          unite_globale = st.selectbox("Unité", ["m²", "ml", "Unité"])
+      else:
+        unite_globale = "Sans métrage"
+        metrage_total = 1.0
+
+      obs_chantier = st.text_input(
+          "📝 Observation globale (Localisation terrasse, détails techniques...)",
+          placeholder="Optionnel",
+      )
+
+      st.markdown("---")
+      st.markdown(f"#### 👷 Pointage individuel ({len(fixes)} ouvriers)")
+
+      donnees_ouvriers = {}
       for _, row in fixes.iterrows():
         w_id = row["id"]
         w_nom = row["nom"]
 
-        st.markdown(f"**👷 {w_nom}**")
-        c_st, c_tch, c_rend = st.columns([1.2, 1.4, 1.4])
-
+        c_nom, c_st, c_app = st.columns([1.5, 1.5, 1.5])
+        with c_nom:
+          st.write(f"**{w_nom}**")
         with c_st:
           st_val = st.selectbox(
               f"Statut {w_nom}",
@@ -193,74 +226,29 @@ if menu == "⚡ Saisie Chantier":
               key=f"st_{w_id}",
               label_visibility="collapsed",
           )
-
-        with c_tch:
-          tache_val = st.selectbox(
-              f"Tâche {w_nom}",
-              LISTE_TACHES,
-              key=f"tch_{w_id}",
-              label_visibility="collapsed",
-          )
-
-        with c_rend:
-          type_travail = st.selectbox(
-              f"Type de travail {w_nom}",
-              ["Métrage (m² / ml)", "Bricol / Sans métrage"],
-              key=f"type_{w_id}",
-              label_visibility="collapsed",
-          )
-
-        qte_val = 0.0
-        unite_val = "m²"
-        obs_val = ""
-        apprec_val = "-"
-
-        if "Présent" in st_val or "1/2" in st_val:
-          sub_c1, sub_c2, sub_c3 = st.columns([1.5, 1.5, 2])
-          with sub_c1:
-            if type_travail == "Métrage (m² / ml)":
-              qte_val = st.number_input(
-                  f"Métrage ({w_nom})",
-                  min_value=0.0,
-                  step=1.0,
-                  value=25.0,
-                  key=f"qte_{w_id}",
-              )
-            else:
-              unite_val = "Sans métrage"
-              qte_val = 1.0
-          with sub_c2:
-            apprec_val = st.selectbox(
-                f"Qualité d'exécution ({w_nom})",
+        with c_app:
+          if "Présent" in st_val or "1/2" in st_val:
+            app_val = st.selectbox(
+                f"Qualité {w_nom}",
                 [
                     "🟢 Conforme / Soigné",
                     "🟡 Moyen / Acceptable",
                     "🔴 Non conforme / À reprendre",
                 ],
                 key=f"app_{w_id}",
+                label_visibility="collapsed",
             )
-          with sub_c3:
-            obs_val = st.text_input(
-                f"Observation ({w_nom})",
-                placeholder="Ex: relevés, acrotères, détails techniques...",
-                key=f"obs_{w_id}",
-            )
-
-        st.markdown("<hr style='margin:6px 0;'>", unsafe_allow_html=True)
+          else:
+            app_val = "-"
+            st.caption("Absent")
 
         donnees_ouvriers[w_id] = {
             "statut": st_val,
-            "tache": (
-                tache_val if ("Présent" in st_val or "1/2" in st_val) else "-"
-            ),
-            "quantite": qte_val,
-            "unite": unite_val,
-            "appreciation": apprec_val,
-            "observation": obs_val,
+            "appreciation": app_val,
         }
 
       btn_valider = st.form_submit_button(
-          "💾 Valider la journée de l'équipe",
+          "💾 Valider la journée du chantier",
           type="primary",
           use_container_width=True,
       )
@@ -269,20 +257,21 @@ if menu == "⚡ Saisie Chantier":
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
+        # Nombre de présents pour répartir la productivité
+        nb_presents = sum(
+            1
+            for d in donnees_ouvriers.values()
+            if "Présent" in d["statut"] or "1/2" in d["statut"]
+        )
+
         for w_id, d in donnees_ouvriers.items():
           st_val = d["statut"]
-          qte = d["quantite"]
-          unite = d["unite"]
           app = d["appreciation"]
 
-          # Calcul du score technique
+          # Calcul du score individuel
           if "Présent" in st_val:
             base_p = 40.0
-            pts_prod = (
-                40.0
-                if (unite == "Sans métrage" or qte >= 30)
-                else (30.0 if qte >= 20 else 15.0)
-            )
+            pts_prod = 40.0
             pts_app = (
                 20.0
                 if "Conforme" in app
@@ -294,7 +283,7 @@ if menu == "⚡ Saisie Chantier":
             )
             score = min(base_p + pts_prod + pts_app, 100.0)
           elif "1/2" in st_val:
-            score = 35.0
+            score = 40.0
           elif "Autorisée" in st_val:
             score = None
           else:
@@ -302,7 +291,7 @@ if menu == "⚡ Saisie Chantier":
 
           c.execute(
               """
-                    INSERT INTO pointages (date_jour, chantier, worker_id, statut, tache, quantite, unite, appreciation, observation, score)
+                    INSERT INTO pointages (date_jour, chantier, worker_id, statut, tache_globale, metrage_global, unite_globale, appreciation, observation, score)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
               (
@@ -310,11 +299,11 @@ if menu == "⚡ Saisie Chantier":
                   chantier_choisi,
                   w_id,
                   st_val,
-                  d["tache"],
-                  qte,
-                  unite,
+                  tache_globale,
+                  metrage_total,
+                  unite_globale,
                   app,
-                  d["observation"],
+                  obs_chantier,
                   score,
               ),
           )
@@ -322,7 +311,8 @@ if menu == "⚡ Saisie Chantier":
         conn.commit()
         conn.close()
         st.success(
-            f"Pointage validé avec succès pour le chantier {chantier_choisi} !"
+            f"Journée validée pour {chantier_choisi} avec {metrage_total}"
+            f" {unite_globale} !"
         )
 
 # 2. DEFINITION DES EQUIPES FIXES
@@ -383,12 +373,12 @@ elif menu == "📊 Historique & Synthèse":
             p.chantier AS Chantier,
             w.nom AS Ouvrier,
             p.statut AS Statut,
-            p.tache AS Tâche,
+            p.tache_globale AS Tâche,
             CASE 
-                WHEN p.unite = 'Sans métrage' THEN 'Bricol / Forfait'
-                WHEN p.quantite > 0 THEN p.quantite || ' ' || p.unite 
+                WHEN p.unite_globale = 'Sans métrage' THEN 'Bricol'
+                WHEN p.metrage_global > 0 THEN p.metrage_global || ' ' || p.unite_globale 
                 ELSE '-'
-            END AS Production,
+            END AS [Production Chantier],
             COALESCE(p.appreciation, '-') AS [Qualité / Appréciation],
             COALESCE(p.observation, '-') AS Observation,
             CASE 
