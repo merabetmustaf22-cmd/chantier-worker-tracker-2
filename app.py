@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = "chantier_roles_v36.db"
+DB_PATH = "chantier_roles_v37.db"
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -143,7 +143,6 @@ def init_database():
             FOREIGN KEY(worker_id) REFERENCES workers(id)
         )
     """)
-  # Conducteurs initiaux
   c.execute(
       "INSERT OR IGNORE INTO conducteurs_meta (tag, nom_affiche) VALUES ('c1',"
       " 'Conducteur 1')"
@@ -153,7 +152,6 @@ def init_database():
       " 'Conducteur 2')"
   )
 
-  # Effectif initial
   for w in EFFECTIF_GLOBAL_INIT:
     c.execute(
         "INSERT OR IGNORE INTO workers (nom, chantier_fixe) VALUES (?, ?)",
@@ -385,7 +383,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
           with col_b2:
             obs_val = st.text_input(
                 "Détail du bricolage",
-                placeholder="Ex: étanchéité regard, solin...",
+                placeholder="Ex: traitement regard, solin...",
                 key=f"obs_br_{conducteur_id_tag}_{w_id}",
             )
       else:
@@ -492,7 +490,7 @@ elif menu_general == f"👷 Espace {nom_c2}":
   interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# 2. ESPACE ADMIN (GESTION TOTALE DES OUVRIERS ET DES CONDUCTEURS)
+# 2. ESPACE ADMIN (GESTION CENTRALISÉE)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
   st.subheader("Accès Sécurisé - Administration")
@@ -527,19 +525,18 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         "Module Administrateur",
         [
             "📊 Registre & Rapport des Pointages",
-            "📝 Modifier / Gérer les Ouvriers",
-            "👤 Modifier les Conducteurs",
+            "👤 Fiches Ouvriers (Infos, Photos & Ajout)",
+            "👷 Noms des Conducteurs",
             "🏗️ Affecter les Chantiers aux Conducteurs",
             "⚡ Fixer l'équipe d'un Chantier",
             "🔄 Transférer un ouvrier individuel",
             "📋 Vue générale des équipes",
-            "📸 Portraits & Profils Photos",
         ],
     )
 
     st.markdown("---")
 
-    # MODULE 1 : REGISTRE & RAPPORTS
+    # MODULE 1 : REGISTRE
     if sous_menu_admin == "📊 Registre & Rapport des Pointages":
       st.markdown("#### Registre des Pointages & Responsables de Saisie")
       conn = get_db_connection()
@@ -592,7 +589,9 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
         df_filtre = df_hist.copy()
         if filtre_cond != "Tous les conducteurs":
-          df_filtre = df_filtre[df_filtre["Conducteur"] == filtre_cond]
+          df_filtre = df_filtre[
+              df_filtre["Conducteur"] == filtre_cond
+          ]
         if filtre_ch != "Tous les chantiers":
           df_filtre = df_filtre[df_filtre["Chantier"] == filtre_ch]
 
@@ -610,110 +609,174 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             use_container_width=True,
         )
 
-    # MODULE 2 : GÉRER ET MODIFIER LES INFORMATIONS DES OUVRIERS
-    elif sous_menu_admin == "📝 Modifier / Gérer les Ouvriers":
-      st.markdown("#### Gestion des Informations des Ouvriers")
+    # MODULE 2 : FICHES OUVRIERS COMBINÉES (INFOS + PHOTOS + AJOUT ENSEMBLE)
+    elif (
+        sous_menu_admin
+        == "👤 Fiches Ouvriers (Infos, Photos & Ajout)"
+    ):
+      st.markdown("#### Gestion Complète des Profils Ouvriers")
       df_w_admin = get_workers_df()
 
-      tab_edit_w, tab_add_w, tab_del_w = st.tabs(
-          ["✏️ Renommer un ouvrier", "➕ Ajouter un ouvrier", "🗑️ Supprimer"]
-      )
+      tab_fiche, tab_nouvel, tab_suppr = st.tabs([
+          "✏️ Fiche & Photo d'un ouvrier",
+          "➕ Ajouter un ouvrier (avec photo)",
+          "🗑️ Supprimer un ouvrier",
+      ])
 
-      with tab_edit_w:
-        ouvrier_a_editer = st.selectbox(
-            "Sélectionner l'ouvrier à modifier :",
+      # 1. FICHE COMPLETE : MODIFIER NOM + PHOTO DIRECTEMENT ENSEMBLE
+      with tab_fiche:
+        ouvrier_sel = st.selectbox(
+            "Sélectionner l'ouvrier à consulter / modifier :",
             df_w_admin["nom"].tolist(),
-            key="sel_ouv_edit",
+            key="sel_ouvrier_fiche_complete",
         )
-        nouveau_nom_ouv = st.text_input(
-            "Nouveau nom complet :", value=ouvrier_a_editer
-        )
+        photo_actuelle = get_photo_path(ouvrier_sel)
 
-        if st.button("💾 Enregistrer la modification", type="primary"):
-          nouveau_nom_ouv = nouveau_nom_ouv.strip()
-          if nouveau_nom_ouv and nouveau_nom_ouv != ouvrier_a_editer:
+        col_photo, col_infos = st.columns([1, 2])
+        with col_photo:
+          if photo_actuelle:
+            st.image(
+                photo_actuelle, caption=f"Photo : {ouvrier_sel}", width=150
+            )
+          else:
+            st.info("Aucune photo enregistrée.")
+
+        with col_infos:
+          nouveau_nom = st.text_input(
+              "Nom de l'ouvrier :",
+              value=ouvrier_sel,
+              key=f"edit_nom_{ouvrier_sel}",
+          )
+          nouvelle_photo = st.file_uploader(
+              "Mettre à jour la photo (Galerie ou Fichier)",
+              type=["jpg", "jpeg", "png"],
+              key=f"upload_photo_{ouvrier_sel}",
+          )
+
+          if st.button("💾 Enregistrer les modifications", type="primary"):
+            nom_propre = nouveau_nom.strip()
             conn = get_db_connection()
             c = conn.cursor()
-            try:
-              c.execute(
-                  "UPDATE workers SET nom = ? WHERE nom = ?",
-                  (nouveau_nom_ouv, ouvrier_a_editer),
-              )
-              conn.commit()
 
-              # Renommer la photo si elle existe
-              ancien_clean = ouvrier_a_editer.replace(" ", "_")
-              nouveau_clean = nouveau_nom_ouv.replace(" ", "_")
-              for ext in [".jpg", ".jpeg", ".png"]:
-                old_p = os.path.join(PHOTOS_DIR, f"{ancien_clean}{ext}")
-                new_p = os.path.join(PHOTOS_DIR, f"{nouveau_clean}{ext}")
-                if os.path.exists(old_p):
-                  os.rename(old_p, new_p)
+            # Renommage de l'ouvrier si changé
+            if nom_propre and nom_propre != ouvrier_sel:
+              try:
+                c.execute(
+                    "UPDATE workers SET nom = ? WHERE nom = ?",
+                    (nom_propre, ouvrier_sel),
+                )
+                conn.commit()
 
-              st.session_state["sync_notif"] = (
-                  f"✅ Ouvrier renommé avec succès : {ouvrier_a_editer} ➔"
-                  f" {nouveau_nom_ouv}"
-              )
-              conn.close()
-              st.rerun()
-            except sqlite3.IntegrityError:
-              conn.close()
-              st.error("Ce nom existe déjà dans la base.")
+                # Renommage de l'ancienne photo pour le nouveau nom
+                old_clean = ouvrier_sel.replace(" ", "_")
+                new_clean = nom_propre.replace(" ", "_")
+                for ext in [".jpg", ".jpeg", ".png"]:
+                  old_f = os.path.join(PHOTOS_DIR, f"{old_clean}{ext}")
+                  new_f = os.path.join(PHOTOS_DIR, f"{new_clean}{ext}")
+                  if os.path.exists(old_f):
+                    os.rename(old_f, new_f)
+                nom_ref = nom_propre
+              except sqlite3.IntegrityError:
+                st.error("Ce nom existe déjà.")
+                conn.close()
+                st.stop()
+            else:
+              nom_ref = ouvrier_sel
 
-      with tab_add_w:
-        nom_nouvel_ouvrier = st.text_input(
-            "Nom et prénom du nouvel ouvrier :", placeholder="Ex: BENALI Samir"
-        )
-        chantier_depart = st.selectbox(
-            "Chantier d'affectation initiale :", LISTE_CHANTIERS
-        )
+            # Enregistrement du nouveau fichier photo s'il est uploadé
+            if nouvelle_photo is not None:
+              ext = nouvelle_photo.name.split(".")[-1].lower()
+              nom_fichier_photo = f"{nom_ref.replace(' ', '_')}.{ext}"
+              chemin_sauvegarder = os.path.join(PHOTOS_DIR, nom_fichier_photo)
+              img = Image.open(nouvelle_photo)
+              img.save(chemin_sauvegarder)
 
-        if st.button("➕ Ajouter à l'effectif"):
-          nom_clean = nom_nouvel_ouvrier.strip()
-          if nom_clean:
+            conn.close()
+            st.session_state["sync_notif"] = (
+                f"✅ Profil et photo mis à jour pour {nom_ref} !"
+            )
+            st.rerun()
+
+      # 2. AJOUTER UN NOUVEL OUVRIER AVEC SA PHOTO
+      with tab_nouvel:
+        st.markdown("##### Enregistrer un nouvel ouvrier")
+        col_n1, col_n2 = st.columns(2)
+        with col_n1:
+          nom_nouveau = st.text_input(
+              "Nom et prénom :",
+              placeholder="Ex: BENKADDOUR Karim",
+              key="in_new_worker_nom",
+          )
+          chantier_init = st.selectbox(
+              "Chantier initial :", LISTE_CHANTIERS, key="sel_new_worker_ch"
+          )
+        with col_n2:
+          photo_nouvel_ouvrier = st.file_uploader(
+              "Photo de profil (Optionnel) :",
+              type=["jpg", "jpeg", "png"],
+              key="upload_new_worker_photo",
+          )
+
+        if st.button("➕ Ajouter l'ouvrier au système", type="primary"):
+          nom_nettoye = nom_nouveau.strip()
+          if nom_nettoye:
             conn = get_db_connection()
             c = conn.cursor()
             try:
               c.execute(
                   "INSERT INTO workers (nom, chantier_fixe) VALUES (?, ?)",
-                  (nom_clean, chantier_depart),
+                  (nom_nettoye, chantier_init),
               )
               conn.commit()
               conn.close()
+
+              if photo_nouvel_ouvrier is not None:
+                ext = photo_nouvel_ouvrier.name.split(".")[-1].lower()
+                nom_fichier = f"{nom_nettoye.replace(' ', '_')}.{ext}"
+                chemin = os.path.join(PHOTOS_DIR, nom_fichier)
+                img = Image.open(photo_nouvel_ouvrier)
+                img.save(chemin)
+
               st.session_state["sync_notif"] = (
-                  f"✅ {nom_clean} a été ajouté à l'effectif !"
+                  f"✅ {nom_nettoye} a été ajouté avec succès avec son profil"
+                  " complet !"
               )
               st.rerun()
             except sqlite3.IntegrityError:
               conn.close()
-              st.error("Cet ouvrier est déjà présent dans la base.")
+              st.error("Cet ouvrier est déjà enregistré.")
 
-      with tab_del_w:
-        ouvrier_a_suppr = st.selectbox(
+      # 3. SUPPRESSION
+      with tab_suppr:
+        st.markdown("##### Retirer un ouvrier de l'effectif")
+        ouvrier_a_del = st.selectbox(
             "Sélectionner l'ouvrier à supprimer :",
             df_w_admin["nom"].tolist(),
-            key="sel_ouv_del",
+            key="sel_ouvrier_suppression",
         )
         if st.button(
-            f"❌ Supprimer définitivement {ouvrier_a_suppr}", type="secondary"
+            f"❌ Supprimer définitivement {ouvrier_a_del}", type="secondary"
         ):
           conn = get_db_connection()
           c = conn.cursor()
-          c.execute("DELETE FROM workers WHERE nom = ?", (ouvrier_a_suppr,))
+          c.execute("DELETE FROM workers WHERE nom = ?", (ouvrier_a_del,))
           conn.commit()
           conn.close()
+
+          clean_nom = ouvrier_a_del.replace(" ", "_")
+          for ext in [".jpg", ".jpeg", ".png"]:
+            p_to_del = os.path.join(PHOTOS_DIR, f"{clean_nom}{ext}")
+            if os.path.exists(p_to_del):
+              os.remove(p_to_del)
+
           st.session_state["sync_notif"] = (
-              f"🗑️ {ouvrier_a_suppr} a été retiré de l'effectif."
+              f"🗑️ {ouvrier_a_del} a été supprimé de la base."
           )
           st.rerun()
 
-    # MODULE 3 : MODIFIER LES INFORMATIONS DES CONDUCTEURS
-    elif sous_menu_admin == "👤 Modifier les Conducteurs":
-      st.markdown("#### Gestion des Profils des Conducteurs")
-      st.caption(
-          "Personnalisez les noms des conducteurs affichés sur les onglets et"
-          " les rapports."
-      )
+    # MODULE 3 : CONDUCTEURS
+    elif sous_menu_admin == "👷 Noms des Conducteurs":
+      st.markdown("#### Personnalisation des Conducteurs de Travaux")
 
       col_ed1, col_ed2 = st.columns(2)
       with col_ed1:
@@ -749,11 +812,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
     # MODULE 4 : ATTRIBUTION DES CHANTIERS
     elif sous_menu_admin == "🏗️ Affecter les Chantiers aux Conducteurs":
       st.markdown("#### Attribution des chantiers sous responsabilité")
-      st.caption(
-          "L'administrateur définit quels chantiers apparaissent pour chaque"
-          " conducteur."
-      )
-
       chantiers_disponibles = [
           c for c in LISTE_CHANTIERS if c != "EN ATTENTE / DEPOT"
       ]
@@ -818,7 +876,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         )
         st.rerun()
 
-    # MODULE 5 : FIXER ÉQUIPE PAR CHANTIER
+    # MODULE 5 : FIXER L'ÉQUIPE DU CHANTIER
     elif sous_menu_admin == "⚡ Fixer l'équipe d'un Chantier":
       st.markdown("#### Définir l'équipe autorisée sur un chantier")
       ch_cible = st.selectbox(
@@ -933,38 +991,3 @@ elif menu_general == "🔐 Espace Admin (Direction)":
           use_container_width=True,
           hide_index=True,
       )
-
-    # MODULE 8 : PHOTOS
-    elif sous_menu_admin == "📸 Portraits & Profils Photos":
-      st.markdown("#### Portraits des ouvriers")
-      df_w_admin = get_workers_df()
-      tous_les_noms = df_w_admin["nom"].tolist()
-
-      ouvrier_photo = st.selectbox(
-          "Sélectionner l'ouvrier", tous_les_noms, key="sel_ouv_photo_adm"
-      )
-      photo_actuelle = get_photo_path(ouvrier_photo)
-
-      col_view, col_upload = st.columns([1, 2])
-      with col_view:
-        if photo_actuelle:
-          st.image(photo_actuelle, caption="Photo actuelle", width=140)
-        else:
-          st.info("Aucune photo enregistrée.")
-
-      with col_upload:
-        fichier_photo = st.file_uploader(
-            "Télécharger une photo (Galerie ou Fichier)",
-            type=["jpg", "jpeg", "png"],
-            key="upload_worker_photo_box",
-        )
-        if fichier_photo is not None:
-          image_obj = Image.open(fichier_photo)
-          ext = fichier_photo.name.split(".")[-1].lower()
-          nom_fichier = f"{ouvrier_photo.replace(' ', '_')}.{ext}"
-          chemin_save = os.path.join(PHOTOS_DIR, nom_fichier)
-          image_obj.save(chemin_save)
-          st.session_state["sync_notif"] = (
-              f"📸 Photo synchronisée pour {ouvrier_photo} !"
-          )
-          st.rerun()
