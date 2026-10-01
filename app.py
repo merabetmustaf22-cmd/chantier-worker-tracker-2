@@ -12,11 +12,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_photos_v23.db")
+DB_PATH = os.path.join("/tmp", "chantier_photos_v24.db")
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
-# Mot de passe du panneau d'administration (modifiable à votre convenance)
 ADMIN_PASSWORD = "admin"
 
 LISTE_CHANTIERS = [
@@ -157,7 +156,7 @@ def get_photo_path(nom_ouvrier):
 st.title("🏗️ Suivi de Chantier & Étanchéité")
 
 menu_general = st.radio(
-    "Navigation Principale",
+    "Navigation",
     ["⚡ Saisie du Jour (Chantier)", "🔐 Panneau d'Administration"],
     horizontal=True,
 )
@@ -177,20 +176,38 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
   df_w = get_workers_df()
   fixes = df_w[df_w["chantier_fixe"] == chantier_choisi]
 
-  st.markdown(f"#### 👷 Équipe affectée au site ({len(fixes)} ouvriers)")
+  # Module de renfort ponctuel : ajouter un ouvrier d'un autre chantier pour la journée
+  ouvriers_autres = df_w[df_w["chantier_fixe"] != chantier_choisi][
+      "nom"
+  ].tolist()
+  with st.expander("🔄 Ajouter un renfort venu d'un autre chantier pour aujourd'hui"):
+    ouvriers_renforts = st.multiselect(
+        "Sélectionner l'ouvrier à intégrer temporairement sur ce site",
+        options=ouvriers_autres,
+        placeholder="Choisir un ouvrier en renfort...",
+    )
 
-  if fixes.empty:
+  # Liste combinée : Équipe fixe + Renforts sélectionnés
+  df_renforts = df_w[df_w["nom"].isin(ouvriers_renforts)]
+  equipe_active = pd.concat([fixes, df_renforts]).drop_duplicates(subset=["id"])
+
+  st.markdown(
+      f"#### 👷 Équipe présente sur le site ({len(equipe_active)} ouvrier(s))"
+  )
+
+  if equipe_active.empty:
     st.warning(
-        f"Aucun ouvrier rattaché au chantier {chantier_choisi}. Rendez-vous"
-        " dans le Panneau d'Administration pour affecter les équipes."
+        f"Aucun ouvrier rattaché au chantier {chantier_choisi}. Ajoutez un"
+        " renfort ci-dessus ou configurez l'équipe dans le Panneau Admin."
     )
   else:
     donnees_ouvriers = {}
 
-    for _, row in fixes.iterrows():
+    for _, row in equipe_active.iterrows():
       w_id = row["id"]
       w_nom = row["nom"]
       photo_p = get_photo_path(w_nom)
+      est_renfort = row["chantier_fixe"] != chantier_choisi
 
       col_av, col_tx = st.columns([1, 4])
       with col_av:
@@ -203,7 +220,8 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
               unsafe_allow_html=True,
           )
       with col_tx:
-        st.markdown(f"### {w_nom}")
+        tag_renfort = " *(Renfort temporaire)*" if est_renfort else ""
+        st.markdown(f"### {w_nom}{tag_renfort}")
 
       st_val = st.selectbox(
           "Statut de présence",
@@ -285,7 +303,7 @@ if menu_general == "⚡ Saisie du Jour (Chantier)":
           with col_b2:
             obs_val = st.text_input(
                 "Détail du bricolage",
-                placeholder="Ex: réparation solin, traitement regard...",
+                placeholder="Ex: étanchéité acrotère, regard, finitions...",
                 key=f"obs_br_{w_id}",
             )
       else:
@@ -405,7 +423,8 @@ elif menu_general == "🔐 Panneau d'Administration":
     sous_menu_admin = st.selectbox(
         "Module Administrateur",
         [
-            "⚙️ Affectations Fixes des Ouvriers",
+            "⚙️ Modifier l'Affectation d'un Ouvrier",
+            "📋 Vue d'ensemble de toutes les Affectations",
             "👤 Profils & Gestion des Photos",
             "📊 Historique des Saisies & Exportation",
         ],
@@ -413,14 +432,50 @@ elif menu_general == "🔐 Panneau d'Administration":
 
     st.markdown("---")
 
-    # AFFECTATIONS FIXES
-    if sous_menu_admin == "⚙️ Affectations Fixes des Ouvriers":
-      st.markdown("#### Affectation Standard par Chantier")
-      st.caption(
-          "Permet de rattacher chaque ouvrier à un site par défaut afin"
-          " qu'il apparaisse directement le matin."
+    # 1. MODIFICATION RAPIDE PAR OUVRIER UNIQUE
+    if sous_menu_admin == "⚙️ Modifier l'Affectation d'un Ouvrier":
+      st.markdown("#### Transfert ou Réaffectation d'un Ouvrier")
+      df_w = get_workers_df()
+
+      ouvrier_a_changer = st.selectbox(
+          "Choisir l'ouvrier à transférer", df_w["nom"].tolist()
+      )
+      infos_actuelles = df_w[df_w["nom"] == ouvrier_a_changer].iloc[0]
+      chantier_actuel = infos_actuelles["chantier_fixe"]
+      ouvrier_id = infos_actuelles["id"]
+
+      st.info(
+          f"Chantier actuel de **{ouvrier_a_changer}** : **{chantier_actuel}**"
       )
 
+      nouveau_chantier = st.selectbox(
+          "Nouveau chantier d'affectation fixe",
+          [c for c in LISTE_CHANTIERS if c != chantier_actuel],
+      )
+
+      if st.button(
+          f"Confirmer le transfert vers {nouveau_chantier}",
+          type="primary",
+          use_container_width=True,
+      ):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute(
+            "UPDATE workers SET chantier_fixe = ? WHERE id = ?",
+            (nouveau_chantier, ouvrier_id),
+        )
+        conn.commit()
+        conn.close()
+        st.success(
+            f"{ouvrier_a_changer} est désormais affecté à {nouveau_chantier} !"
+        )
+        st.rerun()
+
+    # 2. VUE D'ENSEMBLE ET MODIFICATION GLOBALE
+    elif (
+        sous_menu_admin == "📋 Vue d'ensemble de toutes les Affectations"
+    ):
+      st.markdown("#### Tableau Général des Affectations")
       df_w = get_workers_df()
 
       with st.form("form_maj_fixes_admin"):
@@ -436,7 +491,7 @@ elif menu_general == "🔐 Panneau d'Administration":
                 else 0
             )
             nouvelles_affectations[row["id"]] = st.selectbox(
-                f"Chantier fixe de {row['nom']}",
+                f"Chantier de {row['nom']}",
                 LISTE_CHANTIERS,
                 index=idx,
                 key=f"ch_fix_adm_{row['id']}",
@@ -444,7 +499,7 @@ elif menu_general == "🔐 Panneau d'Administration":
             )
 
         if st.form_submit_button(
-            "💾 Sauvegarder les affectations",
+            "💾 Sauvegarder toutes les affectations",
             type="primary",
             use_container_width=True,
         ):
@@ -457,14 +512,12 @@ elif menu_general == "🔐 Panneau d'Administration":
             )
           conn.commit()
           conn.close()
-          st.success("Affectations enregistrées avec succès !")
+          st.success("Toutes les affectations ont été mises à jour !")
           st.rerun()
 
-    # GESTION DES PHOTOS
+    # 3. GESTION DES PHOTOS
     elif sous_menu_admin == "👤 Profils & Gestion des Photos":
-      st.markdown("#### Gestion des Photos de Profil")
-      st.caption("Ajoutez ou modifiez les portraits des ouvriers.")
-
+      st.markdown("#### Gestion des Portraits des Ouvriers")
       ouvrier_photo = st.selectbox(
           "Sélectionner l'ouvrier", EFFECTIF_GLOBAL, key="sel_ouv_photo"
       )
@@ -492,7 +545,7 @@ elif menu_general == "🔐 Panneau d'Administration":
           st.success(f"Photo enregistrée pour {ouvrier_photo} !")
           st.rerun()
 
-    # HISTORIQUE & SYNTHESE
+    # 4. HISTORIQUE & SYNTHESE
     elif (
         sous_menu_admin == "📊 Historique des Saisies & Exportation"
     ):
