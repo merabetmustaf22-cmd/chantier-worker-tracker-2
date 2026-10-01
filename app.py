@@ -14,7 +14,7 @@ st.set_page_config(
 
 DB_PATH = os.path.join("/tmp", "chantier_tracker.db")
 
-# Vos 14 Chantiers réels
+# Vos 14 Chantiers
 LISTE_CHANTIERS = [
     "CAC-31-24",
     "CMA-09-23",
@@ -32,7 +32,7 @@ LISTE_CHANTIERS = [
     "ESC-16-24",
 ]
 
-# Vos Corps d'état & Tâches réelles
+# Vos Corps d'état & Tâches
 LISTE_CORPS_ETAT = [
     "CONGÉ",
     "MALADIE",
@@ -76,7 +76,7 @@ LISTE_CORPS_ETAT = [
     "DIVERS",
 ]
 
-# Votre effectif de 23 ouvriers
+# Effectif de 23 ouvriers
 EFFECTIF_GLOBAL = [
     "ADDA Abbess",
     "MEKHACHEF DJAMEL",
@@ -124,6 +124,7 @@ def get_connection():
             corps_etat TEXT,
             quantite REAL,
             unite TEXT,
+            observation TEXT,
             qualite_dechet TEXT,
             hse_conforme INTEGER,
             score REAL,
@@ -160,7 +161,11 @@ def get_rapports():
             w.nom AS Ouvrier,
             r.statut AS Statut,
             r.corps_etat AS [Corps d'État],
-            r.quantite || ' ' || r.unite AS Production,
+            CASE 
+                WHEN r.unite = 'Sans métrage' THEN 'Bricol / Journée'
+                ELSE r.quantite || ' ' || r.unite 
+            END AS Production,
+            COALESCE(r.observation, '-') AS Observation,
             r.qualite_dechet AS Qualite,
             r.score AS Score
         FROM rapports_journaliers r
@@ -178,6 +183,7 @@ def get_rapports():
           "Statut",
           "Corps d'État",
           "Production",
+          "Observation",
           "Qualite",
           "Score",
       ],
@@ -204,9 +210,7 @@ if onglet == "Saisie Chantier":
       date_jour = st.date_input("📅 Date", value=date.today())
 
     st.markdown("---")
-    nom_ouvrier = st.selectbox(
-        "👷 Ouvrier", list(ouvriers_dict.keys())
-    )
+    nom_ouvrier = st.selectbox("👷 Ouvrier", list(ouvriers_dict.keys()))
 
     statut = st.radio(
         "Statut de la journée",
@@ -218,20 +222,41 @@ if onglet == "Saisie Chantier":
 
     quantite = 0.0
     unite = "m²"
+    observation = ""
     qualite = "Faible (Très bien)"
     hse = True
 
     if statut != "Absent / Congé / Maladie":
-      c1, c2 = st.columns(2)
-      with c1:
-        quantite = st.number_input(
-            "Production réalisée", min_value=0.0, step=0.5, value=25.0
+      # Détection automatique si la tâche commence par BRICOL ou DIVERS
+      est_bricol_auto = "BRICOL" in corps_etat.upper() or corps_etat in [
+          "DIVERS",
+          "nettoyage",
+          "PONSAGE",
+          "décapage",
+      ]
+      sans_metrage = st.checkbox(
+          "🔨 Sans métrage (Bricolage / Finition / Forfait jour)",
+          value=est_bricol_auto,
+      )
+
+      if not sans_metrage:
+        c1, c2 = st.columns(2)
+        with c1:
+          quantite = st.number_input(
+              "Production réalisée", min_value=0.0, step=0.5, value=25.0
+          )
+        with c2:
+          unite = st.selectbox("Unité", ["m²", "ml", "Unité", "Fût"])
+      else:
+        unite = "Sans métrage"
+        quantite = 1.0  # Forfait journée complète ou demi-journée
+        observation = st.text_input(
+            "Détail du travail / Bricol (ex: reprise chéneau, jointure, etc.)",
+            placeholder="Optionnel",
         )
-      with c2:
-        unite = st.selectbox("Unité", ["m²", "ml", "Unité", "Fût", "Bricol"])
 
       qualite = st.select_slider(
-          "Qualité / Déchets & Chutes",
+          "Qualité de finition / Chutes & Propreté",
           options=[
               "Élevé (Mauvais)",
               "Moyen (Acceptable)",
@@ -244,34 +269,43 @@ if onglet == "Saisie Chantier":
     btn_valider = st.form_submit_button("Enregistrer la saisie")
 
     if btn_valider:
-      # Calcul automatique du score
+      # Calcul du score
       if statut == "Absent / Congé / Maladie":
         score = 0.0
       else:
-        score = 30.0 if statut == "Présent (Travail)" else 15.0
-        if quantite >= 40:
-          score += 40
-        elif quantite >= 25:
-          score += 30
-        elif quantite > 0:
-          score += 15
+        base_presence = 30.0 if statut == "Présent (Travail)" else 15.0
 
-        if qualite == "Faible (Très bien)":
-          score += 15
-        elif qualite == "Moyen (Acceptable)":
-          score += 10
+        if unite == "Sans métrage":
+          # Pour un bricol réussi sans métrage, l'assiduité technique est validée
+          points_prod = 40.0 if statut == "Présent (Travail)" else 20.0
+        else:
+          if quantite >= 40:
+            points_prod = 40.0
+          elif quantite >= 25:
+            points_prod = 30.0
+          elif quantite > 0:
+            points_prod = 15.0
+          else:
+            points_prod = 0.0
 
-        if hse:
-          score += 15
-        score = min(score, 100.0)
+        points_qualite = (
+            15.0
+            if qualite == "Faible (Très bien)"
+            else (10.0 if qualite == "Moyen (Acceptable)" else 0.0)
+        )
+        points_hse = 15.0 if hse else 0.0
+
+        score = min(
+            base_presence + points_prod + points_qualite + points_hse, 100.0
+        )
 
       conn = get_connection()
       c = conn.cursor()
       c.execute(
           """
                 INSERT INTO rapports_journaliers 
-                (date_jour, chantier, worker_id, statut, corps_etat, quantite, unite, qualite_dechet, hse_conforme, score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (date_jour, chantier, worker_id, statut, corps_etat, quantite, unite, observation, qualite_dechet, hse_conforme, score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
           (
               str(date_jour),
@@ -281,6 +315,7 @@ if onglet == "Saisie Chantier":
               corps_etat,
               quantite,
               unite,
+              observation,
               qualite,
               int(hse),
               score,
@@ -288,9 +323,7 @@ if onglet == "Saisie Chantier":
       )
       conn.commit()
       conn.close()
-      st.success(
-          f"Enregistré pour {nom_ouvrier} sur {chantier} (Score: {score}/100) !"
-      )
+      st.success(f"Enregistré pour {nom_ouvrier} sur {chantier} !")
 
 # 2. TABLEAU DE BORD
 elif onglet == "Tableau de Bord":
@@ -300,7 +333,6 @@ elif onglet == "Tableau de Bord":
   if df_r.empty:
     st.info("Aucune saisie effectuée pour le moment.")
   else:
-    # Filtres rapides
     col_f1, col_f2 = st.columns(2)
     with col_f1:
       filtre_chantier = st.selectbox(
