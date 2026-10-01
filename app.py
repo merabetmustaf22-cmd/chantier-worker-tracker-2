@@ -12,9 +12,12 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_PATH = os.path.join("/tmp", "chantier_photos_v22.db")
+DB_PATH = os.path.join("/tmp", "chantier_photos_v23.db")
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
+
+# Mot de passe du panneau d'administration (modifiable à votre convenance)
+ADMIN_PASSWORD = "admin"
 
 LISTE_CHANTIERS = [
     "CAC-31-24",
@@ -150,22 +153,20 @@ def get_photo_path(nom_ouvrier):
   return None
 
 
-# --- APPLICATION ---
+# --- STRUCTURE PRINCIPALE ---
 st.title("🏗️ Suivi de Chantier & Étanchéité")
-menu = st.radio(
-    "Navigation",
-    [
-        "⚡ Saisie par Ouvrier",
-        "⚙️ Affectations Fixes",
-        "👤 Profils & Photos",
-        "📊 Historique & Synthèse",
-    ],
+
+menu_general = st.radio(
+    "Navigation Principale",
+    ["⚡ Saisie du Jour (Chantier)", "🔐 Panneau d'Administration"],
     horizontal=True,
 )
 
-# 1. SAISIE INDIVIDUELLE AVEC PHOTO
-if menu == "⚡ Saisie par Ouvrier":
-  st.subheader("Pointage & Rendement Individuel")
+# ==============================================================================
+# 1. ESPACE TERRAIN : SAISIE DU JOUR
+# ==============================================================================
+if menu_general == "⚡ Saisie du Jour (Chantier)":
+  st.subheader("Pointage & Rendement Journalier")
 
   col_ch, col_dt = st.columns(2)
   with col_ch:
@@ -181,7 +182,7 @@ if menu == "⚡ Saisie par Ouvrier":
   if fixes.empty:
     st.warning(
         f"Aucun ouvrier rattaché au chantier {chantier_choisi}. Rendez-vous"
-        " dans l'onglet '⚙️ Affectations Fixes'."
+        " dans le Panneau d'Administration pour affecter les équipes."
     )
   else:
     donnees_ouvriers = {}
@@ -194,11 +195,11 @@ if menu == "⚡ Saisie par Ouvrier":
       col_av, col_tx = st.columns([1, 4])
       with col_av:
         if photo_p:
-          st.image(photo_p, width=70)
+          st.image(photo_p, width=65)
         else:
           st.markdown(
               "<div"
-              " style='font-size:45px;line-height:70px;text-align:center;'>👷</div>",
+              " style='font-size:42px;line-height:65px;text-align:center;'>👷</div>",
               unsafe_allow_html=True,
           )
       with col_tx:
@@ -284,7 +285,7 @@ if menu == "⚡ Saisie par Ouvrier":
           with col_b2:
             obs_val = st.text_input(
                 "Détail du bricolage",
-                placeholder="Ex: étanchéité acrotère, solin, finitions...",
+                placeholder="Ex: réparation solin, traitement regard...",
                 key=f"obs_br_{w_id}",
             )
       else:
@@ -369,123 +370,168 @@ if menu == "⚡ Saisie par Ouvrier":
           f" {chantier_choisi} !"
       )
 
-# 2. DEFINITION DES EQUIPES FIXES
-elif menu == "⚙️ Affectations Fixes":
-  st.subheader("Affectation Fixe des Ouvriers par Chantier")
-  st.caption(
-      "Définissez l'affectation standard de chaque ouvrier afin d'afficher"
-      " automatiquement l'équipe correspondante lors de la saisie."
-  )
+# ==============================================================================
+# 2. ESPACE ADMINISTRATION
+# ==============================================================================
+elif menu_general == "🔐 Panneau d'Administration":
+  st.subheader("Accès Sécurisé Administration")
 
-  df_w = get_workers_df()
+  if "admin_logged_in" not in st.session_state:
+    st.session_state["admin_logged_in"] = False
 
-  with st.form("form_maj_fixes"):
-    nouvelles_affectations = {}
-    for _, row in df_w.iterrows():
-      c1, c2 = st.columns([1.5, 2])
-      with c1:
-        st.write(f"👷 **{row['nom']}**")
-      with c2:
-        idx = (
-            LISTE_CHANTIERS.index(row["chantier_fixe"])
-            if row["chantier_fixe"] in LISTE_CHANTIERS
-            else 0
-        )
-        nouvelles_affectations[row["id"]] = st.selectbox(
-            f"Chantier fixe de {row['nom']}",
-            LISTE_CHANTIERS,
-            index=idx,
-            key=f"ch_fix_{row['id']}",
-            label_visibility="collapsed",
-        )
-
-    btn_sauvegarder = st.form_submit_button(
-        "💾 Enregistrer les affectations",
-        type="primary",
-        use_container_width=True,
-    )
-
-    if btn_sauvegarder:
-      conn = sqlite3.connect(DB_PATH)
-      c = conn.cursor()
-      for w_id, ch_nom in nouvelles_affectations.items():
-        c.execute(
-            "UPDATE workers SET chantier_fixe = ? WHERE id = ?", (ch_nom, w_id)
-        )
-      conn.commit()
-      conn.close()
-      st.success("Affectations fixes enregistrées avec succès !")
-      st.rerun()
-
-# 3. GESTION DES PHOTOS DE PROFIL
-elif menu == "👤 Profils & Photos":
-  st.subheader("Gestion des Photos des Ouvriers")
-  st.caption("Importez ou prenez en photo un ouvrier pour associer son visage à son profil.")
-
-  ouvrier_photo = st.selectbox("Sélectionner l'ouvrier", EFFECTIF_GLOBAL)
-  photo_actuelle = get_photo_path(ouvrier_photo)
-
-  col_view, col_upload = st.columns([1, 2])
-  with col_view:
-    if photo_actuelle:
-      st.image(photo_actuelle, caption="Photo actuelle", width=130)
-    else:
-      st.info("Aucune photo associée.")
-
-  with col_upload:
-    fichier_photo = st.file_uploader(
-        "Choisir une photo (Galerie ou Fichier)",
-        type=["jpg", "jpeg", "png"],
-        key="upload_worker_photo",
-    )
-    if fichier_photo is not None:
-      image_obj = Image.open(fichier_photo)
-      nom_fichier = (
-          f"{ouvrier_photo.replace(' ', '_')}.{fichier_photo.name.split('.')[-1]}"
+  if not st.session_state["admin_logged_in"]:
+    col_p1, col_p2 = st.columns([2, 1])
+    with col_p1:
+      mdp = st.text_input(
+          "Code d'accès administrateur",
+          type="password",
+          placeholder="Entrez le mot de passe...",
       )
-      chemin_save = os.path.join(PHOTOS_DIR, nom_fichier)
-      image_obj.save(chemin_save)
-      st.success(f"Photo mise à jour pour {ouvrier_photo} !")
-      st.rerun()
-
-# 4. HISTORIQUE & SYNTHESE
-elif menu == "📊 Historique & Synthèse":
-  st.subheader("Historique des Saisies & Rendements Individuels")
-  conn = sqlite3.connect(DB_PATH)
-  query = """
-        SELECT 
-            p.date_jour AS Date,
-            p.chantier AS Chantier,
-            w.nom AS Ouvrier,
-            p.statut AS Statut,
-            p.tache AS Tâche,
-            CASE 
-                WHEN p.unite = 'Sans métrage' THEN 'Bricol'
-                WHEN p.quantite > 0 THEN p.quantite || ' ' || p.unite 
-                ELSE '-'
-            END AS [Production],
-            COALESCE(p.appreciation, '-') AS [Qualité],
-            COALESCE(p.observation, '-') AS Observation,
-            CASE 
-                WHEN p.score IS NULL THEN 'Justifié'
-                ELSE CAST(p.score AS TEXT)
-            END AS Score
-        FROM pointages p
-        JOIN workers w ON p.worker_id = w.id
-        ORDER BY p.id DESC
-    """
-  df_hist = pd.read_sql_query(query, conn)
-  conn.close()
-
-  if df_hist.empty:
-    st.info("Aucune donnée enregistrée pour le moment.")
+    with col_p2:
+      st.write("")
+      st.write("")
+      if st.button("Connexion", type="primary", use_container_width=True):
+        if mdp == ADMIN_PASSWORD:
+          st.session_state["admin_logged_in"] = True
+          st.rerun()
+        else:
+          st.error("Mot de passe incorrect.")
   else:
-    st.dataframe(df_hist, use_container_width=True, hide_index=True)
-    csv = df_hist.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "📥 Exporter les données (CSV)",
-        data=csv,
-        file_name="suivi_chantier_etancheite.csv",
-        mime="text/csv",
-        use_container_width=True,
+    st.sidebar.button(
+        "Déconnexion Admin",
+        on_click=lambda: st.session_state.update({"admin_logged_in": False}),
     )
+
+    sous_menu_admin = st.selectbox(
+        "Module Administrateur",
+        [
+            "⚙️ Affectations Fixes des Ouvriers",
+            "👤 Profils & Gestion des Photos",
+            "📊 Historique des Saisies & Exportation",
+        ],
+    )
+
+    st.markdown("---")
+
+    # AFFECTATIONS FIXES
+    if sous_menu_admin == "⚙️ Affectations Fixes des Ouvriers":
+      st.markdown("#### Affectation Standard par Chantier")
+      st.caption(
+          "Permet de rattacher chaque ouvrier à un site par défaut afin"
+          " qu'il apparaisse directement le matin."
+      )
+
+      df_w = get_workers_df()
+
+      with st.form("form_maj_fixes_admin"):
+        nouvelles_affectations = {}
+        for _, row in df_w.iterrows():
+          c1, c2 = st.columns([1.5, 2])
+          with c1:
+            st.write(f"👷 **{row['nom']}**")
+          with c2:
+            idx = (
+                LISTE_CHANTIERS.index(row["chantier_fixe"])
+                if row["chantier_fixe"] in LISTE_CHANTIERS
+                else 0
+            )
+            nouvelles_affectations[row["id"]] = st.selectbox(
+                f"Chantier fixe de {row['nom']}",
+                LISTE_CHANTIERS,
+                index=idx,
+                key=f"ch_fix_adm_{row['id']}",
+                label_visibility="collapsed",
+            )
+
+        if st.form_submit_button(
+            "💾 Sauvegarder les affectations",
+            type="primary",
+            use_container_width=True,
+        ):
+          conn = sqlite3.connect(DB_PATH)
+          c = conn.cursor()
+          for w_id, ch_nom in nouvelles_affectations.items():
+            c.execute(
+                "UPDATE workers SET chantier_fixe = ? WHERE id = ?",
+                (ch_nom, w_id),
+            )
+          conn.commit()
+          conn.close()
+          st.success("Affectations enregistrées avec succès !")
+          st.rerun()
+
+    # GESTION DES PHOTOS
+    elif sous_menu_admin == "👤 Profils & Gestion des Photos":
+      st.markdown("#### Gestion des Photos de Profil")
+      st.caption("Ajoutez ou modifiez les portraits des ouvriers.")
+
+      ouvrier_photo = st.selectbox(
+          "Sélectionner l'ouvrier", EFFECTIF_GLOBAL, key="sel_ouv_photo"
+      )
+      photo_actuelle = get_photo_path(ouvrier_photo)
+
+      col_view, col_upload = st.columns([1, 2])
+      with col_view:
+        if photo_actuelle:
+          st.image(photo_actuelle, caption="Photo actuelle", width=140)
+        else:
+          st.info("Aucune photo enregistrée.")
+
+      with col_upload:
+        fichier_photo = st.file_uploader(
+            "Télécharger une photo (Galerie ou Fichier)",
+            type=["jpg", "jpeg", "png"],
+            key="upload_worker_photo_adm",
+        )
+        if fichier_photo is not None:
+          image_obj = Image.open(fichier_photo)
+          ext = fichier_photo.name.split(".")[-1].lower()
+          nom_fichier = f"{ouvrier_photo.replace(' ', '_')}.{ext}"
+          chemin_save = os.path.join(PHOTOS_DIR, nom_fichier)
+          image_obj.save(chemin_save)
+          st.success(f"Photo enregistrée pour {ouvrier_photo} !")
+          st.rerun()
+
+    # HISTORIQUE & SYNTHESE
+    elif (
+        sous_menu_admin == "📊 Historique des Saisies & Exportation"
+    ):
+      st.markdown("#### Registre des Pointages & Rendements")
+      conn = sqlite3.connect(DB_PATH)
+      query = """
+            SELECT 
+                p.date_jour AS Date,
+                p.chantier AS Chantier,
+                w.nom AS Ouvrier,
+                p.statut AS Statut,
+                p.tache AS Tâche,
+                CASE 
+                    WHEN p.unite = 'Sans métrage' THEN 'Bricol'
+                    WHEN p.quantite > 0 THEN p.quantite || ' ' || p.unite 
+                    ELSE '-'
+                END AS [Production],
+                COALESCE(p.appreciation, '-') AS [Qualité],
+                COALESCE(p.observation, '-') AS Observation,
+                CASE 
+                    WHEN p.score IS NULL THEN 'Justifié'
+                    ELSE CAST(p.score AS TEXT)
+                END AS Score
+            FROM pointages p
+            JOIN workers w ON p.worker_id = w.id
+            ORDER BY p.id DESC
+        """
+      df_hist = pd.read_sql_query(query, conn)
+      conn.close()
+
+      if df_hist.empty:
+        st.info("Aucune saisie enregistrée pour l'instant.")
+      else:
+        st.dataframe(df_hist, use_container_width=True, hide_index=True)
+        csv = df_hist.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Exporter les données (CSV)",
+            data=csv,
+            file_name="suivi_chantier_etancheite.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
