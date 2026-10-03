@@ -7,7 +7,7 @@ import pandas as pd
 from PIL import Image
 import streamlit as st
 
-# Import optionnel et sécurisé pour Streamlit Cloud
+# Moteur de style Excel
 try:
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -215,80 +215,232 @@ def get_photo_path(identifiant):
             return p
     return None
 
-def generer_fichier_excel_pro(df_data, titre_rapport="RAPPORT JOURNALIER D'ACTIVITÉ & ÉTANCHÉITÉ"):
+def generer_fichier_excel_design_couleurs(df_data):
+    """Génère un rapport Excel haut de gamme avec palette de couleurs, cartouche KPI et formatage conditionnel."""
     if not OPENPYXL_DISPO:
         return None
+
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Suivi Chantier"
+    ws.title = "Rapport Activité"
     ws.views.sheetView[0].showGridLines = True
 
-    ws.merge_cells("A1:J1")
-    titre_cell = ws["A1"]
-    titre_cell.value = titre_rapport
-    titre_cell.font = Font(name="Calibri", size=15, bold=True, color="FFFFFF")
-    titre_cell.fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
-    titre_cell.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[1].height = 40
+    # Palette de couleurs professionnelle
+    C_HEADER_TOP = "1B365D"       # Bleu nuit profond
+    C_HEADER_TABLE = "2C4D75"     # Bleu acier foncé
+    C_ZEBRA = "F7F9FC"            # Gris très pâle bleuté
+    C_BORDER = "D1D5DB"           # Gris clair bordure
 
-    ws["A2"] = f"Date d'exportation : {datetime.now().strftime('%d/%m/%Y à %H:%M')}"
-    ws["A2"].font = Font(name="Calibri", size=10, italic=True, color="555555")
-    ws["J2"] = f"Total entrées : {len(df_data)}"
-    ws["J2"].font = Font(name="Calibri", size=10, bold=True, color="1F497D")
-    ws["J2"].alignment = Alignment(horizontal="right")
-    ws.row_dimensions[2].height = 20
+    # Couleurs de statut
+    C_VERT_BG = "E6F4EA"          # Présent / Conforme
+    C_VERT_TXT = "137333"
+    C_JAUNE_BG = "FEF7E0"         # 1/2 journée / Moyen
+    C_JAUNE_TXT = "B06000"
+    C_ROUGE_BG = "FCE8E6"         # Absence / Non conforme
+    C_ROUGE_TXT = "C5221F"
+    C_SCORE_HAUT = "D4EDDA"       # Vert clair
+    C_SCORE_MOY = "FFF3CD"        # Jaune ambre
 
-    headers = list(df_data.columns)
-    ws.append(headers)
-    header_row_idx = 3
-    ws.row_dimensions[header_row_idx].height = 28
-
-    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="244062", end_color="244062", fill_type="solid")
     thin_border = Border(
-        left=Side(style='thin', color='D9D9D9'),
-        right=Side(style='thin', color='D9D9D9'),
-        top=Side(style='thin', color='D9D9D9'),
-        bottom=Side(style='thin', color='D9D9D9')
+        left=Side(style='thin', color=C_BORDER),
+        right=Side(style='thin', color=C_BORDER),
+        top=Side(style='thin', color=C_BORDER),
+        bottom=Side(style='thin', color=C_BORDER)
     )
 
+    # 1. En-tête principal
+    ws.merge_cells("A1:J1")
+    title_cell = ws["A1"]
+    title_cell.value = "SUIVI QUOTIDIEN DE CHANTIER — TRAVAUX D'ÉTANCHÉITÉ"
+    title_cell.font = Font(name="Segoe UI", size=15, bold=True, color="FFFFFF")
+    title_cell.fill = PatternFill(start_color=C_HEADER_TOP, end_color=C_HEADER_TOP, fill_type="solid")
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 42
+
+    # 2. Cartouches d'indicateurs clés (KPIs)
+    total_lignes = len(df_data)
+    presents_cnt = sum(1 for v in df_data["Statut"] if "Présent" in str(v))
+    demi_cnt = sum(1 for v in df_data["Statut"] if "1/2" in str(v))
+    absents_cnt = sum(1 for v in df_data["Statut"] if "Absence" in str(v))
+
+    kpi_configs = [
+        ("A3:B3", "A4:B4", "TOTAL OUVRIERS", str(total_lignes), "E8EEF5", "1B365D"),
+        ("D3:E3", "D4:E4", "PRÉSENTS (Jour)", f"{presents_cnt}", "E6F4EA", "137333"),
+        ("G3:H3", "G4:H4", "1/2 JOURNÉES", f"{demi_cnt}", "FEF7E0", "B06000"),
+        ("I3:J3", "I4:J4", "ABSENCES", f"{absents_cnt}", "FCE8E6", "C5221F"),
+    ]
+
+    for label_range, val_range, lbl, val, bg_color, txt_color in kpi_configs:
+        ws.merge_cells(label_range)
+        top_cell = ws[label_range.split(":")[0]]
+        top_cell.value = lbl
+        top_cell.font = Font(name="Segoe UI", size=8, bold=True, color="6B7280")
+        top_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
+        top_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        ws.merge_cells(val_range)
+        bottom_cell = ws[val_range.split(":")[0]]
+        bottom_cell.value = val
+        bottom_cell.font = Font(name="Segoe UI", size=14, bold=True, color=txt_color)
+        bottom_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
+        bottom_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.row_dimensions[3].height = 16
+    ws.row_dimensions[4].height = 24
+    ws.row_dimensions[5].height = 10
+
+    # 3. Tableau de données (En-têtes ligne 6)
+    headers = list(df_data.columns)
+    ws.append(headers)
+    ws.row_dimensions[6].height = 28
+
+    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color=C_HEADER_TABLE, end_color=C_HEADER_TABLE, fill_type="solid")
+
     for col_idx in range(1, len(headers) + 1):
-        cell = ws.cell(row=header_row_idx, column=col_idx)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = thin_border
+        c = ws.cell(row=6, column=col_idx)
+        c.font = header_font
+        c.fill = header_fill
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.border = thin_border
 
-    zebra_fill = PatternFill(start_color="F2F5F8", end_color="F2F5F8", fill_type="solid")
-    data_font = Font(name="Calibri", size=10)
+    # 4. Insertion des lignes avec mise en forme conditionnelle
+    zebra_fill = PatternFill(start_color=C_ZEBRA, end_color=C_ZEBRA, fill_type="solid")
+    regular_font = Font(name="Segoe UI", size=9)
 
-    for row_idx, row_values in enumerate(df_data.itertuples(index=False), start=4):
+    for row_idx, row_values in enumerate(df_data.itertuples(index=False), start=7):
         ws.append(list(row_values))
         ws.row_dimensions[row_idx].height = 22
         is_even = (row_idx % 2 == 0)
 
         for col_idx in range(1, len(headers) + 1):
-            c = ws.cell(row=row_idx, column=col_idx)
-            c.font = data_font
-            c.border = thin_border
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.font = regular_font
+            cell.border = thin_border
             if is_even:
-                c.fill = zebra_fill
+                cell.fill = zebra_fill
 
-            if col_idx in [1, 5, 8, 10]:
-                c.alignment = Alignment(horizontal="center", vertical="center")
-            elif col_idx == 7:
-                c.alignment = Alignment(horizontal="right", vertical="center")
+            val_str = str(cell.value or "")
+
+            # Alignements par colonne
+            if col_idx in [1, 5, 8, 10]:  # Date, Statut, Qualité, Score
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_idx == 7:           # Production
+                cell.alignment = Alignment(horizontal="right", vertical="center")
             else:
-                c.alignment = Alignment(horizontal="left", vertical="center")
+                cell.alignment = Alignment(horizontal="left", vertical="center")
 
+            # Col 5 : Statut
+            if col_idx == 5:
+                if "Présent" in val_str:
+                    cell.fill = PatternFill(start_color=C_VERT_BG, end_color=C_VERT_BG, fill_type="solid")
+                    cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_VERT_TXT)
+                elif "1/2" in val_str:
+                    cell.fill = PatternFill(start_color=C_JAUNE_BG, end_color=C_JAUNE_BG, fill_type="solid")
+                    cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_JAUNE_TXT)
+                elif "Absence" in val_str:
+                    cell.fill = PatternFill(start_color=C_ROUGE_BG, end_color=C_ROUGE_BG, fill_type="solid")
+                    cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_ROUGE_TXT)
+
+            # Col 8 : Qualité d'exécution
+            elif col_idx == 8:
+                if "Conforme" in val_str:
+                    cell.fill = PatternFill(start_color=C_VERT_BG, end_color=C_VERT_BG, fill_type="solid")
+                    cell.font = Font(name="Segoe UI", size=9, color=C_VERT_TXT)
+                elif "Moyen" in val_str:
+                    cell.fill = PatternFill(start_color=C_JAUNE_BG, end_color=C_JAUNE_BG, fill_type="solid")
+                    cell.font = Font(name="Segoe UI", size=9, color=C_JAUNE_TXT)
+                elif "Non conforme" in val_str:
+                    cell.fill = PatternFill(start_color=C_ROUGE_BG, end_color=C_ROUGE_BG, fill_type="solid")
+                    cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_ROUGE_TXT)
+
+            # Col 10 : Score d'évaluation
+            elif col_idx == 10:
+                try:
+                    score_num = float(val_str)
+                    if score_num >= 80:
+                        cell.fill = PatternFill(start_color=C_SCORE_HAUT, end_color=C_SCORE_HAUT, fill_type="solid")
+                        cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_VERT_TXT)
+                    elif score_num >= 50:
+                        cell.fill = PatternFill(start_color=C_SCORE_MOY, end_color=C_SCORE_MOY, fill_type="solid")
+                        cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_JAUNE_TXT)
+                    else:
+                        cell.fill = PatternFill(start_color=C_ROUGE_BG, end_color=C_ROUGE_BG, fill_type="solid")
+                        cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_ROUGE_TXT)
+                except ValueError:
+                    pass
+
+    # 5. Largeur adaptative des colonnes
     for col in ws.columns:
-        max_len = max(len(str(cell.value or '')) for cell in col)
+        if col[0].row < 6:
+            continue
+        max_len = max(len(str(c.value or '')) for c in col)
         col_letter = get_column_letter(col[0].column)
-        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 13)
 
     output = io.BytesIO()
     wb.save(output)
     return output.getvalue()
+
+def generer_rapport_html_colore(df_data):
+    """Génère une page Web imprimable prête pour PDF avec palette complète de couleurs si openpyxl n'est pas actif."""
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 20px; color: #222; }}
+        .header {{ background: #1B365D; color: white; padding: 18px; text-align: center; border-radius: 8px 8px 0 0; font-size: 18px; font-weight: bold; }}
+        .kpi-row {{ display: flex; gap: 10px; margin: 15px 0; }}
+        .kpi {{ flex: 1; padding: 12px; border-radius: 6px; text-align: center; border: 1px solid #E5E7EB; }}
+        .kpi-label {{ font-size: 11px; font-weight: bold; color: #6B7280; text-transform: uppercase; }}
+        .kpi-val {{ font-size: 22px; font-weight: bold; margin-top: 4px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }}
+        th {{ background: #2C4D75; color: white; padding: 10px 8px; font-weight: 600; text-align: center; }}
+        td {{ padding: 8px; border-bottom: 1px solid #E5E7EB; }}
+        tr:nth-child(even) {{ background: #F9FAFB; }}
+        .badge {{ padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; display: inline-block; }}
+        .badge-vert {{ background: #E6F4EA; color: #137333; }}
+        .badge-jaune {{ background: #FEF7E0; color: #B06000; }}
+        .badge-rouge {{ background: #FCE8E6; color: #C5221F; }}
+    </style>
+    </head>
+    <body>
+        <div class="header">SUIVI QUOTIDIEN DE CHANTIER — RAPPORT OFFICIEL</div>
+        <div class="kpi-row">
+            <div class="kpi" style="background:#F0F4F8;"><div class="kpi-label">Total Entrées</div><div class="kpi-val" style="color:#1B365D;">{len(df_data)}</div></div>
+            <div class="kpi" style="background:#E6F4EA;"><div class="kpi-label">Présents</div><div class="kpi-val" style="color:#137333;">{sum(1 for v in df_data['Statut'] if 'Présent' in str(v))}</div></div>
+            <div class="kpi" style="background:#FEF7E0;"><div class="kpi-label">1/2 Journées</div><div class="kpi-val" style="color:#B06000;">{sum(1 for v in df_data['Statut'] if '1/2' in str(v))}</div></div>
+            <div class="kpi" style="background:#FCE8E6;"><div class="kpi-label">Absences</div><div class="kpi-val" style="color:#C5221F;">{sum(1 for v in df_data['Statut'] if 'Absence' in str(v))}</div></div>
+        </div>
+        <table>
+            <thead><tr>
+    """
+    for col in df_data.columns:
+        html += f"<th>{col}</th>"
+    html += "</tr></thead><tbody>"
+
+    for _, row in df_data.iterrows():
+        html += "<tr>"
+        for col_name, val in row.items():
+            val_str = str(val or "-")
+            if col_name == "Statut":
+                cls = "badge-vert" if "Présent" in val_str else ("badge-jaune" if "1/2" in val_str else "badge-rouge")
+                html += f'<td style="text-align:center;"><span class="badge {cls}">{val_str}</span></td>'
+            elif col_name == "Qualité":
+                cls = "badge-vert" if "Conforme" in val_str else ("badge-jaune" if "Moyen" in val_str else ("badge-rouge" if "Non" in val_str else ""))
+                html += f'<td style="text-align:center;"><span class="badge {cls}">{val_str}</span></td>'
+            elif col_name in ["Date", "Score"]:
+                html += f'<td style="text-align:center;"><b>{val_str}</b></td>'
+            elif col_name == "Production":
+                html += f'<td style="text-align:right;"><b>{val_str}</b></td>'
+            else:
+                html += f"<td>{val_str}</td>"
+        html += "</tr>"
+
+    html += "</tbody></table></body></html>"
+    return html.encode("utf-8")
 
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
@@ -456,7 +608,7 @@ elif menu_general == f"👷 Espace {nom_c2}":
     interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# 2. ESPACE ADMIN
+# 2. ESPACE ADMIN (AVEC RAPPORT COLORÉ PROFESSIONNEL)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
     st.subheader("Accès Sécurisé - Administration")
@@ -495,7 +647,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             st.session_state["admin_active_module"] = None
 
         MODULES_ADMIN = [
-            ("mod_rapport", "📊 Registre & Rapports", "Consulter, corriger ou exporter les rapports Excel"),
+            ("mod_rapport", "📊 Registre & Rapports Colorés", "Consulter, corriger ou exporter les rapports Excel"),
             ("mod_chantiers_taches", "🏗️ Chantiers & Corps d'état", "Ajouter, modifier ou supprimer des chantiers et tâches"),
             ("mod_profils", "👥 Profils & Photos", "Gérer les noms et photos des Conducteurs et Ouvriers"),
             ("mod_chantiers_cond", "👷 Chantiers / Conducteurs", "Attribuer les chantiers sous la responsabilité de chacun"),
@@ -543,9 +695,10 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             st.markdown("---")
 
+            # 1. MODULE REGISTRE ET EXPORT COLORÉ
             if mod_actuel == "mod_rapport":
-                st.markdown("### 📊 Registre & Gestion des Saisies Conducteurs")
-                tab_reg, tab_corr = st.tabs(["📋 Registre & Exportation Excel", "✏️ Corriger un Pointage (Admin)"])
+                st.markdown("### 📊 Registre Officiel & Rapports Colorés")
+                tab_reg, tab_corr = st.tabs(["📋 Rapport & Téléchargement", "✏️ Corriger une Saisie"])
 
                 conn = get_db_connection()
                 query_admin = """
@@ -571,7 +724,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                 with tab_reg:
                     if df_all_pointages.empty:
-                        st.warning("⚠️ Aucune saisie n'a encore été effectuée ou validée dans le registre.")
+                        st.warning("⚠️️ Aucune saisie n'a encore été effectuée ou validée dans le registre.")
                     else:
                         c_f1, c_f2 = st.columns(2)
                         with c_f1:
@@ -595,34 +748,50 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         colonnes_vues = ["Date", "Chantier", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Observation", "Score"]
                         df_final_export = df_affichage[colonnes_vues]
 
-                        st.markdown(f"**Lignes filtrées :** `{len(df_final_export)}` enregistrement(s)")
+                        # Cartouche indicateurs dans l'application
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("Total Ouvriers", len(df_final_export))
+                        m2.metric("Présents", sum(1 for v in df_final_export["Statut"] if "Présent" in str(v)))
+                        m3.metric("1/2 Journées", sum(1 for v in df_final_export["Statut"] if "1/2" in str(v)))
+                        m4.metric("Absences", sum(1 for v in df_final_export["Statut"] if "Absence" in str(v)))
+
                         st.dataframe(df_final_export, use_container_width=True, hide_index=True)
 
-                        st.markdown("#### 📥 Téléchargements Officiels")
+                        st.markdown("#### 📥 Téléchargements Stylisés & Colorés")
                         col_dl1, col_dl2 = st.columns(2)
 
-                        csv_propre = df_final_export.to_csv(index=False, sep=";", encoding="utf-8-sig")
-                        with col_dl1:
-                            st.download_button(
-                                "📥 Télécharger CSV Pro (Excel avec colonnes)",
-                                data=csv_propre.encode("utf-8-sig"),
-                                file_name=f"rapport_travaux_{date.today()}.csv",
-                                mime="text/csv",
-                                use_container_width=True
-                            )
-
-                        with col_dl2:
-                            if OPENPYXL_DISPO:
-                                excel_pro_bytes = generer_fichier_excel_pro(df_final_export)
+                        # Option A : Excel avec couleurs conditionnelles
+                        if OPENPYXL_DISPO:
+                            excel_bytes = generer_fichier_excel_design_couleurs(df_final_export)
+                            with col_dl1:
                                 st.download_button(
-                                    "📗 Télécharger le Rapport Excel (.xlsx)",
-                                    data=excel_pro_bytes,
-                                    file_name=f"rapport_travaux_{date.today()}.xlsx",
+                                    "📗 Télécharger le Rapport Excel Stylisé (.xlsx)",
+                                    data=excel_bytes,
+                                    file_name=f"rapport_design_{date.today()}.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     use_container_width=True
                                 )
-                            else:
-                                st.caption("💡 Le CSV ci-contre s'ouvre parfaitement dans Excel avec séparateur `;`.")
+                        else:
+                            with col_dl1:
+                                csv_propre = df_final_export.to_csv(index=False, sep=";", encoding="utf-8-sig")
+                                st.download_button(
+                                    "📥 Télécharger CSV (Excel Séparateur ;)",
+                                    data=csv_propre.encode("utf-8-sig"),
+                                    file_name=f"rapport_travaux_{date.today()}.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
+
+                        # Option B : Page Web / PDF Imprimable
+                        html_bytes = generer_rapport_html_colore(df_final_export)
+                        with col_dl2:
+                            st.download_button(
+                                "📄 Télécharger Rapport HTML (Couleurs & Prêt à Imprimer)",
+                                data=html_bytes,
+                                file_name=f"rapport_visuel_{date.today()}.html",
+                                mime="text/html",
+                                use_container_width=True
+                            )
 
                 with tab_corr:
                     st.markdown("##### Rectifier ou supprimer une saisie erronée")
@@ -924,7 +1093,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             chantiers_options = get_all_chantiers()
                             chantier_init = st.selectbox("Chantier initial :", chantiers_options, key="sel_new_worker_ch_tab")
                         with col_add2:
-                            photo_nouvel_ouvrier = st.file_uploader("Photo (Optionnel) :", type=["jpg", "jpeg", "png"], key="upload_new_worker_photo_tab")
+                            photo_nouvel_ouvrier = st.file_uploader("Photo (Optionnel) :", type=["jpg", "jpeg", "png"], key=upload_new_worker_photo_tab)
 
                         if st.button("➕ Ajouter l'ouvrier", type="primary", key="btn_add_worker_tab"):
                             nom_nettoye = nom_nouveau.strip()
@@ -964,7 +1133,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 if os.path.exists(p_to_del):
                                     os.remove(p_to_del)
 
-                            st.session_state["sync_notif"] = f"🗑️ {ouvrier_a_del} supprimé de la base."
+                            st.session_state["sync_notif"] = f"🗑️️ {ouvrier_a_del} supprimé de la base."
                             st.rerun()
 
             elif mod_actuel == "mod_chantiers_cond":
