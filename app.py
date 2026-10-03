@@ -434,6 +434,9 @@ menu_general = st.radio(
     horizontal=False
 )
 
+# ==============================================================================
+# INTERFACE CONDUCTEUR EN 2 ÉTAPES (AVEC DISPARITION DES CHANTIERS TERMINÉS)
+# ==============================================================================
 def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     photo_cond = get_photo_path(conducteur_id_tag)
     
@@ -447,14 +450,33 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
         st.subheader(f"Pointage — {default_nom}")
 
     date_choisie = st.date_input("📅 Date de saisie", value=date.today(), key=f"date_{conducteur_id_tag}")
+    date_str = str(date_choisie)
     chantiers_autorises = get_chantiers_conducteur(conducteur_id_tag)
 
     if not chantiers_autorises:
         st.warning(f"⚠️ Aucun chantier attribué à {default_nom}.\n\nVeuillez contacter l'administrateur.")
         return
 
-    chantier_choisi = st.selectbox("📍 Sélectionner le Chantier", chantiers_autorises, key=f"ch_sel_{conducteur_id_tag}")
-    date_str = str(date_choisie)
+    # Séparation : chantiers restants à faire vs chantiers déjà validés
+    chantiers_non_faits = [ch for ch in chantiers_autorises if not est_deja_valide(date_str, ch)]
+    chantiers_faits = [ch for ch in chantiers_autorises if est_deja_valide(date_str, ch)]
+
+    # Si tous les chantiers sont terminés pour ce jour
+    if not chantiers_non_faits:
+        st.success(f"🎉 Tous vos chantiers du {date_str} ont été pointés et validés avec succès !")
+        st.markdown(f"**Chantiers complétés aujourd'hui :** `{', '.join(chantiers_faits)}`")
+        
+        # Option facultative pour réviser un chantier déjà validé
+        st.markdown("---")
+        afficher_modif = st.checkbox("Modifier ou revoir un chantier déjà validé", key=f"cb_rev_{conducteur_id_tag}")
+        if not afficher_modif:
+            return
+        liste_options_chantiers = chantiers_faits
+    else:
+        # La liste n'affiche QUE les chantiers qui n'ont pas encore été faits
+        liste_options_chantiers = chantiers_non_faits
+
+    chantier_choisi = st.selectbox("📍 Sélectionner le Chantier à pointer", liste_options_chantiers, key=f"ch_sel_{conducteur_id_tag}")
     deja_fait = est_deja_valide(date_str, chantier_choisi)
 
     if deja_fait:
@@ -463,7 +485,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     df_w = get_workers_df()
     equipe_active = df_w[df_w["chantier_fixe"] == chantier_choisi]
 
-    st.markdown(f"**Effectif présent :** `{len(equipe_active)}` ouvrier(s)")
+    st.markdown(f"**Effectif sur {chantier_choisi} :** `{len(equipe_active)}` ouvrier(s)")
 
     if equipe_active.empty:
         st.warning(f"⚠️ Aucun ouvrier affecté à {chantier_choisi}.")
@@ -477,7 +499,9 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     if presence_data_key not in st.session_state:
         st.session_state[presence_data_key] = {}
 
-    # ÉTAPE 1 : POINTAGE
+    # --------------------------------------------------------------------------
+    # ÉTAPE 1 : POINTAGE (PRÉSENCE / ABSENCE)
+    # --------------------------------------------------------------------------
     if st.session_state[step_key] == 1:
         st.markdown("### 📋 Étape 1 : Présence & Absences")
         st.caption("Sélectionnez le statut de chaque ouvrier puis passez à l'étape suivante.")
@@ -525,10 +549,12 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st.session_state[step_key] = 2
             st.rerun()
 
+    # --------------------------------------------------------------------------
     # ÉTAPE 2 : PRODUCTION & CONTRÔLE QUALITÉ
+    # --------------------------------------------------------------------------
     elif st.session_state[step_key] == 2:
         st.markdown("### 🔨 Étape 2 : Production & Appréciation")
-        st.caption("Saisie réservée uniquement aux ouvriers présents. Les absences sont validées directement.")
+        st.caption("Saisie uniquement pour les présents. Les absences sont validées automatiquement.")
 
         if st.button("⬅️ Retour au Pointage (Étape 1)", use_container_width=True):
             st.session_state[step_key] = 1
@@ -613,7 +639,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                     "eval_travailleur": "-"
                 }
 
-        label_save = "🔄 Mettre à jour la validation" if deja_fait else "💾 Valider définitivement la journée"
+        label_save = "🔄 Mettre à jour la validation" if deja_fait else "💾 Valider définitivement le chantier"
         if st.button(label_save, type="primary", use_container_width=True):
             conn = get_db_connection()
             c = conn.cursor()
@@ -647,9 +673,8 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             conn.close()
 
             st.session_state[step_key] = 1
-            st.session_state["sync_notif"] = f"✅ Journée validée pour {chantier_choisi} !"
+            st.session_state["sync_notif"] = f"✅ Pointage validé avec succès pour {chantier_choisi} !"
             st.rerun()
-
 
 # ==============================================================================
 # ROUTAGE DES ESPACES
@@ -1044,7 +1069,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                 with tab_ouv:
                     df_w_m = get_workers_df()
-                    sub_ed, sub_ad, sub_dl = st.tabs(["✏️ Modifier", "➕ Ajouter", "🗑️ Supprimer"])
+                    sub_ed, sub_ad, sub_dl = st.tabs(["✏️️ Modifier", "➕ Ajouter", "🗑️ Supprimer"])
                     with sub_ed:
                         o_sel = st.selectbox("Sélectionner l'ouvrier :", df_w_m["nom"].tolist(), key="sel_ouv_cfg")
                         ph_o = get_photo_path(o_sel)
@@ -1113,7 +1138,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             c.execute("DELETE FROM workers WHERE nom = ?", (ouv_del_s,))
                             conn.commit()
                             conn.close()
-                            st.session_state["sync_notif"] = f"🗑️ {ouv_del_s} supprimé de la base."
+                            st.session_state["sync_notif"] = f"🗑 {ouv_del_s} supprimé de la base."
                             st.rerun()
 
             # 7. CHANTIERS & TÂCHES
