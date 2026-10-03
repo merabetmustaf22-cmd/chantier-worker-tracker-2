@@ -212,16 +212,20 @@ def get_photo_path(identifiant):
             return p
     return None
 
+# ==============================================================================
+# GÉNÉRATEUR EXCEL AVEC FEUILLE BILAN OUVRIERS & PRIMES
+# ==============================================================================
 def generer_classeur_pro_excel(df_data, titre_rapport):
     wb = openpyxl.Workbook()
     
     BLEU_HEADER = "1E3A8A"
     BLEU_TITRE = "0F172A"
+    VERT_TITRE = "065F46"
+    VERT_HEADER = "047857"
     GRIS_ZEBRA = "F8FAFC"
     GRIS_TOTAL = "E2E8F0"
     BORDER_COLOR = "CBD5E1"
     
-    # Couleurs du thème
     VERT_BG, VERT_TXT = "DCFCE7", "166534"
     JAUNE_BG, JAUNE_TXT = "FEF9C3", "854D0E"
     ORANGE_BG, ORANGE_TXT = "FFEDD5", "C2410C"
@@ -241,13 +245,15 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     thin_side = Side(style='thin', color=BORDER_COLOR)
     cell_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
     
-    # 1. FEUILLE SYNTHÈSE GÉNÉRALE
+    # -------------------------------------------------------------------------
+    # FEUILLE 1 : SYNTHÈSE GÉNÉRALE DES CHANTIERS
+    # -------------------------------------------------------------------------
     ws_sum = wb.active
-    ws_sum.title = "Synthèse Générale"
+    ws_sum.title = "Synthèse Chantiers"
     ws_sum.views.sheetView[0].showGridLines = True
     
     ws_sum.merge_cells("A1:G1")
-    ws_sum["A1"] = f"RAPPORT GÉNÉRAL DES CHANTIERS — {titre_rapport.upper()}"
+    ws_sum["A1"] = f"RÉCAPITULATIF DES CHANTIERS — {titre_rapport.upper()}"
     ws_sum["A1"].font = font_titre
     ws_sum["A1"].fill = fill_titre
     ws_sum["A1"].alignment = Alignment(horizontal="center", vertical="center")
@@ -312,19 +318,139 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     for col_lettre, larg in largeurs_sum.items():
         ws_sum.column_dimensions[col_lettre].width = larg
 
-    # 2. FEUILLES INDIVIDUELLES PAR CHANTIER
-    headers_detail = ["Date", "Conducteur", "Ouvrier", "Statut", "Corps d'état / Tâche", "Production", "Contrôle Qualité", "Observation / Rendement", "Score"]
+    # -------------------------------------------------------------------------
+    # FEUILLE 2 : 👥 BILAN & ATTRIBUTION DES PRIMES PAR OUVRIER (NOUVEAU)
+    # -------------------------------------------------------------------------
+    ws_ouv = wb.create_sheet(title="Bilan & Primes Ouvriers")
+    ws_ouv.views.sheetView[0].showGridLines = True
     
+    ws_ouv.merge_cells("A1:J1")
+    ws_ouv["A1"] = f"BILAN INDIVIDUEL MENSUEL & ÉVALUATION DES PRIMES — {titre_rapport.upper()}"
+    ws_ouv["A1"].font = font_titre
+    ws_ouv["A1"].fill = PatternFill(start_color=VERT_TITRE, end_color=VERT_TITRE, fill_type="solid")
+    ws_ouv["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws_ouv.row_dimensions[1].height = 40
+    
+    headers_ouvriers = [
+        "Nom et Prénom", "Chantier Principal", "Jours Payés", "Absences Autorisées",
+        "Absences Injustifiées", "Production (m²)", "Score Moyen", "Éligibilité Prime",
+        "Proposition Décision", "Montant Prime (DZD)"
+    ]
+    ws_ouv.append([])
+    ws_ouv.append(headers_ouvriers)
+    ws_ouv.row_dimensions[3].height = 28
+    
+    for col_idx in range(1, len(headers_ouvriers) + 1):
+        c = ws_ouv.cell(row=3, column=col_idx)
+        c.font = font_header
+        c.fill = PatternFill(start_color=VERT_HEADER, end_color=VERT_HEADER, fill_type="solid")
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.border = cell_border
+
+    largeurs_ouv = {
+        "A": 26, "B": 20, "C": 14, "D": 18,
+        "E": 20, "F": 16, "G": 14, "H": 22,
+        "I": 24, "J": 22
+    }
+    for col_lettre, larg in largeurs_ouv.items():
+        ws_ouv.column_dimensions[col_lettre].width = larg
+
+    r_ouv_idx = 4
+    tot_j_ouv = 0.0
+    tot_m2_ouv = 0.0
+
+    for w_name, w_grp in df_data.groupby("Ouvrier"):
+        ch_princip = w_grp["Chantier"].mode()[0] if not w_grp.empty else "-"
+        p_cnt = sum(1 for v in w_grp["Statut"] if "Présent" in str(v))
+        d_cnt = sum(1 for v in w_grp["Statut"] if "1/2" in str(v))
+        j_payes = p_cnt + (d_cnt * 0.5)
+        
+        abs_aut = sum(1 for v in w_grp["Statut"] if "Autorisée" in str(v))
+        abs_injust = sum(1 for v in w_grp["Statut"] if "Non Autorisée" in str(v) or "Injustifiée" in str(v))
+        
+        prod_m2 = w_grp[(w_grp["Unite"] == "m²") & (w_grp["Quantite"] > 0)]["Quantite"].sum()
+        
+        # Calcul du score moyen sur les jours notés
+        scores_valides = pd.to_numeric(w_grp["Score"], errors='coerce').dropna()
+        score_moy = scores_valides.mean() if not scores_valides.empty else 0.0
+        
+        # Règle d'éligibilité aux primes (BTP Étanchéité)
+        if abs_injust > 0:
+            elig_prime = "Non Éligible"
+            prop_decision = "Pénalité (Absence injustifiée)"
+        elif score_moy >= 90.0 and j_payes >= 20.0:
+            elig_prime = "Éligible Prime Maximale (A+)"
+            prop_decision = "Prime de Rendement Supérieure"
+        elif score_moy >= 80.0:
+            elig_prime = "Éligible Prime Standard (A)"
+            prop_decision = "Prime de Rendement Normale"
+        elif score_moy >= 70.0:
+            elig_prime = "Prime d'Encouragement (B)"
+            prop_decision = "Prime Partielle / Encouragement"
+        else:
+            elig_prime = "Sans Prime"
+            prop_decision = "Rendement Insuffisant"
+
+        vals_ouvrier = [
+            w_name, ch_princip, j_payes, abs_aut, abs_injust,
+            round(prod_m2, 1), round(score_moy, 1), elig_prime, prop_decision, ""
+        ]
+        ws_ouv.append(vals_ouvrier)
+        ws_ouv.row_dimensions[r_ouv_idx].height = 22
+        
+        c_fill_def = fill_zebra if r_ouv_idx % 2 == 0 else fill_white
+        for col_idx in range(1, len(headers_ouvriers) + 1):
+            c = ws_ouv.cell(row=r_ouv_idx, column=col_idx)
+            c.font = font_body
+            c.border = cell_border
+            c.fill = c_fill_def
+            
+            if col_idx in [3, 4, 5, 6, 7]:
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_idx in [8, 9]:
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_idx == 10:
+                c.alignment = Alignment(horizontal="right", vertical="center")
+            else:
+                c.alignment = Alignment(horizontal="left", vertical="center")
+                
+            # Couleurs dynamiques d'évaluation des primes
+            if col_idx == 8:
+                if "A+" in elig_prime or "Maximale" in elig_prime:
+                    c.fill = PatternFill(start_color=VERT_BG, end_color=VERT_BG, fill_type="solid")
+                    c.font = Font(name="Segoe UI", size=9, bold=True, color=VERT_TXT)
+                elif "Standard" in elig_prime:
+                    c.fill = PatternFill(start_color=JAUNE_BG, end_color=JAUNE_BG, fill_type="solid")
+                    c.font = Font(name="Segoe UI", size=9, bold=True, color=JAUNE_TXT)
+                elif "Encouragement" in elig_prime:
+                    c.fill = PatternFill(start_color=ORANGE_BG, end_color=ORANGE_BG, fill_type="solid")
+                    c.font = Font(name="Segoe UI", size=9, bold=True, color=ORANGE_TXT)
+                else:
+                    c.fill = PatternFill(start_color=ROUGE_BG, end_color=ROUGE_BG, fill_type="solid")
+                    c.font = Font(name="Segoe UI", size=9, bold=True, color=ROUGE_TXT)
+
+        tot_j_ouv += j_payes
+        tot_m2_ouv += prod_m2
+        r_ouv_idx += 1
+
+    # Ligne Total Ouvriers
+    ws_ouv.append(["TOTAL / MOYENNE", f"{df_data['Ouvrier'].nunique()} Ouvriers", tot_j_ouv, "-", "-", round(tot_m2_ouv, 1), "-", "-", "-", ""])
+    ws_ouv.row_dimensions[r_ouv_idx].height = 26
+    for col_idx in range(1, len(headers_ouvriers) + 1):
+        c = ws_ouv.cell(row=r_ouv_idx, column=col_idx)
+        c.font = font_total
+        c.fill = fill_total
+        c.border = cell_border
+        if col_idx in [3, 4, 5, 6, 7]:
+            c.alignment = Alignment(horizontal="center", vertical="center")
+
+    # -------------------------------------------------------------------------
+    # FEUILLES 3+ : INDIVIDUELLES PAR CHANTIER
+    # -------------------------------------------------------------------------
+    headers_detail = ["Date", "Conducteur", "Ouvrier", "Statut", "Corps d'état / Tâche", "Production", "Contrôle Qualité", "Observation / Rendement", "Score"]
     largeurs_detail = {
-        "A": 14,
-        "B": 18,
-        "C": 26,
-        "D": 22,
-        "E": 28,
-        "F": 16,
-        "G": 22,
-        "H": 38,
-        "I": 12,
+        "A": 14, "B": 18, "C": 26, "D": 20, "E": 28,
+        "F": 16, "G": 22, "H": 38, "I": 12
     }
 
     for ch_name, grp in df_data.groupby("Chantier"):
@@ -370,8 +496,6 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         r_idx = 5
         for _, r in grp.iterrows():
             prod_aff = "Bricolage" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
-            
-            # Nettoyage des parenthèses et des emojis
             statut_aff = str(r["Statut"]).replace("(Journée)", "").replace("(Congé/Maladie)", "").replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
             qual_clean = str(r["Qualité"]).replace("/ À reprendre", "").replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
             obs_clean = str(r["Observation"]).replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
@@ -397,7 +521,7 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
                 else:
                     c.alignment = Alignment(horizontal="left", vertical="center")
                 
-                # 1. Statut (Colonne 4)
+                # Coloration
                 if col_idx == 4:
                     if "Présent" in statut_aff:
                         c.fill = PatternFill(start_color=VERT_BG, end_color=VERT_BG, fill_type="solid")
@@ -406,15 +530,12 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
                         c.fill = PatternFill(start_color=JAUNE_BG, end_color=JAUNE_BG, fill_type="solid")
                         c.font = Font(name="Segoe UI", size=9, bold=True, color=JAUNE_TXT)
                     elif "Autorisée" in statut_aff:
-                        # Orange pour l'absence autorisée
                         c.fill = PatternFill(start_color=ORANGE_BG, end_color=ORANGE_BG, fill_type="solid")
                         c.font = Font(name="Segoe UI", size=9, bold=True, color=ORANGE_TXT)
                     elif "Absence" in statut_aff:
-                        # Rouge pour absence injustifiée
                         c.fill = PatternFill(start_color=ROUGE_BG, end_color=ROUGE_BG, fill_type="solid")
                         c.font = Font(name="Segoe UI", size=9, bold=True, color=ROUGE_TXT)
                         
-                # 2. Contrôle Qualité (Colonne 7)
                 elif col_idx == 7:
                     if "Conforme" in qual_clean and "Non" not in qual_clean:
                         c.fill = PatternFill(start_color=VERT_BG, end_color=VERT_BG, fill_type="solid")
@@ -426,7 +547,6 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
                         c.fill = PatternFill(start_color=ROUGE_BG, end_color=ROUGE_BG, fill_type="solid")
                         c.font = Font(name="Segoe UI", size=9, bold=True, color=ROUGE_TXT)
                         
-                # 3. Observation / Rendement (Colonne 8)
                 elif col_idx == 8:
                     if "bon rendement" in obs_clean or "Excellent" in obs_clean or "Bon travail" in obs_clean:
                         c.fill = PatternFill(start_color=VERT_BG, end_color=VERT_BG, fill_type="solid")
@@ -447,6 +567,8 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     wb.save(buf)
     return buf.getvalue()
 
+
+# Notifications
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
 
@@ -730,7 +852,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
         MODULES_ADMIN = [
             ("mod_rapport", "📊 Bilan Mensuel & Rapports"),
-            ("mod_corriger", "✏️️ Corriger un Pointage"),
+            ("mod_corriger", "✏️ Corriger un Pointage"),
             ("mod_transfert", "🔄 Transférer un Ouvrier"),
             ("mod_equipes", "⚡ Équipes par Chantier"),
             ("mod_chantiers_cond", "👷 Affecter les Chantiers"),
@@ -817,42 +939,84 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     k4.metric("Production (m²)", f"{m2_tot:.1f} m²")
 
                     st.markdown("---")
-                    st.markdown("#### 1. Synthèse par Chantier")
-                    ch_synth = []
-                    for ch_name, grp in df_mois_actuel.groupby("Chantier"):
-                        p_cnt = sum(1 for v in grp["Statut"] if "Présent" in str(v))
-                        d_cnt = sum(1 for v in grp["Statut"] if "1/2" in str(v))
-                        a_cnt = sum(1 for v in grp["Statut"] if "Absence" in str(v))
-                        j_val = p_cnt + (d_cnt * 0.5)
-                        m2_val = grp[(grp["Unite"] == "m²") & (grp["Quantite"] > 0)]["Quantite"].sum()
+                    tab_synth1, tab_synth2, tab_synth3 = st.tabs([
+                        "🏗️ Synthèse par Chantier",
+                        "👥 Bilan & Primes Ouvriers",
+                        "📋 Registre Détaillé"
+                    ])
 
-                        ch_synth.append({
-                            "Chantier": ch_name,
-                            "Effectif": grp["Ouvrier"].nunique(),
-                            "Présents (J)": p_cnt,
-                            "1/2 J": d_cnt,
-                            "Absences": a_cnt,
-                            "Jours Payés": f"{j_val} j",
-                            "Métré (m²)": f"{m2_val:.1f} m²"
-                        })
+                    with tab_synth1:
+                        ch_synth = []
+                        for ch_name, grp in df_mois_actuel.groupby("Chantier"):
+                            p_cnt = sum(1 for v in grp["Statut"] if "Présent" in str(v))
+                            d_cnt = sum(1 for v in grp["Statut"] if "1/2" in str(v))
+                            a_cnt = sum(1 for v in grp["Statut"] if "Absence" in str(v))
+                            j_val = p_cnt + (d_cnt * 0.5)
+                            m2_val = grp[(grp["Unite"] == "m²") & (grp["Quantite"] > 0)]["Quantite"].sum()
 
-                    df_ch_synth = pd.DataFrame(ch_synth)
-                    st.dataframe(df_ch_synth, use_container_width=True, hide_index=True)
+                            ch_synth.append({
+                                "Chantier": ch_name,
+                                "Effectif": grp["Ouvrier"].nunique(),
+                                "Présents (J)": p_cnt,
+                                "1/2 J": d_cnt,
+                                "Absences": a_cnt,
+                                "Jours Payés": f"{j_val} j",
+                                "Métré (m²)": f"{m2_val:.1f} m²"
+                            })
 
-                    st.markdown("---")
-                    st.markdown("#### 2. Registre Détaillé des Pointages")
-                    df_vue_detail = df_mois_actuel.copy()
-                    df_vue_detail["Production"] = df_vue_detail.apply(
-                        lambda r: "Bricolage" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-"),
-                        axis=1
-                    )
-                    cols_finales = ["Chantier", "Date", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Score"]
-                    st.dataframe(df_vue_detail[cols_finales], use_container_width=True, hide_index=True)
+                        df_ch_synth = pd.DataFrame(ch_synth)
+                        st.dataframe(df_ch_synth, use_container_width=True, hide_index=True)
+
+                    with tab_synth2:
+                        st.markdown("##### 👥 Performance Individuelle & Éligibilité Primes")
+                        ouv_synth_list = []
+                        for w_name, w_grp in df_mois_actuel.groupby("Ouvrier"):
+                            p_c = sum(1 for v in w_grp["Statut"] if "Présent" in str(v))
+                            d_c = sum(1 for v in w_grp["Statut"] if "1/2" in str(v))
+                            j_p = p_c + (d_c * 0.5)
+                            abs_injust = sum(1 for v in w_grp["Statut"] if "Non Autorisée" in str(v) or "Injustifiée" in str(v))
+                            prod_w = w_grp[(w_grp["Unite"] == "m²") & (w_grp["Quantite"] > 0)]["Quantite"].sum()
+                            
+                            scores_v = pd.to_numeric(w_grp["Score"], errors='coerce').dropna()
+                            sc_m = scores_v.mean() if not scores_v.empty else 0.0
+
+                            if abs_injust > 0:
+                                mention = "❌ Non Éligible (Absence)"
+                            elif sc_m >= 90.0 and j_p >= 20.0:
+                                mention = "🥇 Prime Maximale (A+)"
+                            elif sc_m >= 80.0:
+                                mention = "🥈 Prime Standard (A)"
+                            elif sc_m >= 70.0:
+                                mention = "🥉 Encouragement (B)"
+                            else:
+                                mention = "Sans Prime"
+
+                            ouv_synth_list.append({
+                                "Ouvrier": w_name,
+                                "Chantier": w_grp["Chantier"].mode()[0] if not w_grp.empty else "-",
+                                "Jours Payés": f"{j_p} j",
+                                "Absences Injustifiées": abs_injust,
+                                "Production (m²)": f"{prod_w:.1f} m²",
+                                "Score (/100)": f"{sc_m:.1f}",
+                                "Statut Prime": mention
+                            })
+
+                        df_ouv_synth = pd.DataFrame(ouv_synth_list)
+                        st.dataframe(df_ouv_synth, use_container_width=True, hide_index=True)
+
+                    with tab_synth3:
+                        df_vue_detail = df_mois_actuel.copy()
+                        df_vue_detail["Production"] = df_vue_detail.apply(
+                            lambda r: "Bricolage" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-"),
+                            axis=1
+                        )
+                        cols_finales = ["Chantier", "Date", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Score"]
+                        st.dataframe(df_vue_detail[cols_finales], use_container_width=True, hide_index=True)
 
                     st.markdown("#### 📥 Téléchargements")
                     excel_pro_bytes = generer_classeur_pro_excel(df_mois_actuel, mois_choisi)
                     st.download_button(
-                        label="📗 Télécharger le Rapport Excel (.xlsx) Formaté & Organisé",
+                        label="📗 Télécharger le Rapport Excel (.xlsx) avec Feuille Primes & Chantiers",
                         data=excel_pro_bytes,
                         file_name=f"rapport_chantiers_{mois_choisi}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -958,7 +1122,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             c.execute("DELETE FROM pointages WHERE id = ?", (pt_id,))
                             conn.commit()
                             conn.close()
-                            st.session_state["sync_notif"] = f"🗑️️ Pointage #{pt_id} supprimé."
+                            st.session_state["sync_notif"] = f"🗑 Pointage #{pt_id} supprimé."
                             st.rerun()
 
             elif mod_actuel == "mod_transfert":
@@ -1162,7 +1326,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 st.rerun()
                             except sqlite3.IntegrityError:
                                 conn.close()
-                                st.error("Ce nom existe déjà.")
+                                st.error("Ce chantier existe déjà.")
 
                     st.markdown("---")
                     ch_a_renom = st.selectbox("Chantier à renommer :", liste_ch, key="sel_mod_ch_cfg")
