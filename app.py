@@ -19,7 +19,7 @@ except ImportError:
 st.set_page_config(
     page_title="Suivi Chantier & Étanchéité",
     page_icon="🏗️",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="collapsed",
 )
 
@@ -33,8 +33,8 @@ st.markdown("""
             padding-left: 0.6rem !important;
             padding-right: 0.6rem !important;
         }
-        h1 { font-size: 1.45rem !important; }
-        h2 { font-size: 1.25rem !important; }
+        h1 { font-size: 1.4rem !important; }
+        h2 { font-size: 1.2rem !important; }
         h3 { font-size: 1.1rem !important; }
         .stButton>button {
             height: 48px !important;
@@ -414,13 +414,15 @@ def generer_classeur_par_chantier_separe(df_mois, mois_label):
     wb.save(output)
     return output.getvalue()
 
+
+# Notifications
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
 
 if st.session_state["sync_notif"]:
     st.success(st.session_state["sync_notif"])
 
-st.title("🏗️ Suivi de Chantier & Étanchéité")
+st.title("🏗️ Suivi Chantier & Étanchéité")
 
 dict_conducteurs = get_conducteurs_dict()
 nom_c1 = dict_conducteurs.get("c1", "Conducteur 1")
@@ -575,7 +577,7 @@ elif menu_general == f"👷 Espace {nom_c2}":
     interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# ESPACE ADMIN (MENU RÉORGANISÉ PAR PRIORITÉ)
+# ESPACE ADMIN (TITRES SIMPLES & PROPRES)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
     st.subheader("Accès Sécurisé - Administration")
@@ -606,33 +608,33 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             st.session_state["admin_active_module"] = None
 
         # ----------------------------------------------------------------------
-        # TARTIB L'JIDID : LES PRIORITÉS D'ABORD, LES EDITS F LAKHER
+        # TITRES COURTS, SIMPLES ET SANS PARENTHÈSES
         # ----------------------------------------------------------------------
         MODULES_ADMIN = [
-            # 1. Priorités Quotidiennes
-            ("mod_rapport", "📊 Bilan Mensuel & Synthèses", "Consulter les totaux, séparer par chantier et exporter Excel"),
-            ("mod_corriger", "✏️ Corriger un Pointage", "Modifier ou supprimer les erreurs commises par les conducteurs"),
-            ("mod_transfert", "🔄 Transférer Ouvrier", "Déplacer rapidement un ouvrier vers un autre chantier"),
+            # 1. Actions Quotidiennes (Priorités)
+            ("mod_rapport", "📊 Bilan Mensuel & Rapports"),
+            ("mod_corriger", "✏️ Corriger un Pointage"),
+            ("mod_transfert", "🔄 Transférer un Ouvrier"),
             
-            # 2. Configurations & Éditions (F lakher)
-            ("mod_equipes", "⚡ Équipes par Chantier", "Définir et verrouiller l'équipe affectée à chaque projet"),
-            ("mod_chantiers_cond", "👷 Affecter Chantiers", "Gérer les chantiers sous la responsabilité de chaque conducteur"),
-            ("mod_profils", "👥 Profils & Photos", "Modifier les noms, photos et ajouter des profils"),
-            ("mod_chantiers_taches", "🏗️ Chantiers & Corps d'état", "Ajouter, renommer ou supprimer les chantiers et les tâches"),
+            # 2. Configurations & Éditions de Base
+            ("mod_equipes", "⚡ Équipes par Chantier"),
+            ("mod_chantiers_cond", "👷 Affecter les Chantiers"),
+            ("mod_profils", "👥 Profils & Photos"),
+            ("mod_chantiers_taches", "🏗️ Chantiers & Tâches"),
         ]
 
         if st.session_state["admin_active_module"] is None:
             st.markdown("### 🎛 Menu Administrateur")
             
-            st.markdown("##### ⚡ Actions Quotidiennes (Priorités)")
-            for tag, titre, desc in MODULES_ADMIN[:3]:
-                if st.button(f"{titre}\n({desc})", key=f"btn_case_{tag}", use_container_width=True):
+            st.markdown("##### ⚡ Actions Quotidiennes")
+            for tag, titre in MODULES_ADMIN[:3]:
+                if st.button(titre, key=f"btn_case_{tag}", use_container_width=True):
                     st.session_state["admin_active_module"] = tag
                     st.rerun()
 
-            st.markdown("##### ⚙️ Configurations & Éditions de Base")
-            for tag, titre, desc in MODULES_ADMIN[3:]:
-                if st.button(f"{titre}\n({desc})", key=f"btn_case_{tag}", use_container_width=True):
+            st.markdown("##### ⚙️ Configurations & Éditions")
+            for tag, titre in MODULES_ADMIN[3:]:
+                if st.button(titre, key=f"btn_case_{tag}", use_container_width=True):
                     st.session_state["admin_active_module"] = tag
                     st.rerun()
 
@@ -645,9 +647,9 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             st.markdown("---")
 
-            # 1. MODULE BILAN MENSUEL ET SYNTHÈSE
+            # 1. BILAN MENSUEL ET RAPPORTS
             if mod_actuel == "mod_rapport":
-                st.markdown("### 📊 Bilan Mensuel Organisé")
+                st.markdown("### 📊 Bilan Mensuel & Rapports")
 
                 conn = get_db_connection()
                 query_admin = """
@@ -679,9 +681,9 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                     c_m1, c_m2 = st.columns([1, 2])
                     with c_m1:
-                        mois_choisi = st.selectbox("📅 Sélectionner le Mois :", mois_dispos)
+                        mois_choisi = st.selectbox("📅 Mois :", mois_dispos)
                     with c_m2:
-                        filtre_ch = st.selectbox("📍 Filtrer par Chantier :", ["Tous les chantiers"] + sorted(df_all["Chantier"].unique().tolist()))
+                        filtre_ch = st.selectbox("📍 Chantier :", ["Tous les chantiers"] + sorted(df_all["Chantier"].unique().tolist()))
 
                     df_mois_actuel = df_all[df_all["Mois_Annee"] == mois_choisi].copy()
                     if filtre_ch != "Tous les chantiers":
@@ -702,7 +704,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     k4.metric("Production (m²)", f"{m2_tot:.1f} m²")
 
                     st.markdown("---")
-                    st.markdown("#### 1. Synthèse Globale par Chantier")
+                    st.markdown("#### 1. Synthèse par Chantier")
                     ch_synth = []
                     for ch_name, grp in df_mois_actuel.groupby("Chantier"):
                         p_cnt = sum(1 for v in grp["Statut"] if "Présent" in str(v))
@@ -758,9 +760,9 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             use_container_width=True
                         )
 
-            # 2. MODULE CORRECTION DES ERREURS CONDUCTEURS
+            # 2. CORRIGER UN POINTAGE
             elif mod_actuel == "mod_corriger":
-                st.markdown("### ✏️ Corriger ou Rectifier une Saisie")
+                st.markdown("### ✏️ Corriger un Pointage")
                 
                 conn = get_db_connection()
                 query_admin = """
@@ -790,11 +792,11 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         lambda r: f"ID #{r['ID']} | {r['Date']} | {r['Chantier']} | {r['Ouvrier']}",
                         axis=1
                     )
-                    ligne_choisie = st.selectbox("Sélectionner la ligne à modifier :", df_pts["label"].tolist(), key="sel_pt_correction_prio")
+                    ligne_choisie = st.selectbox("Sélectionner la ligne :", df_pts["label"].tolist(), key="sel_pt_correction_prio")
                     row_sel = df_pts[df_pts["label"] == ligne_choisie].iloc[0]
                     pt_id = int(row_sel["ID"])
 
-                    st.info(f"Modification : **{row_sel['Ouvrier']}** — {row_sel['Chantier']} ({row_sel['Date']}) par {row_sel['Conducteur']}")
+                    st.info(f"**{row_sel['Ouvrier']}** — {row_sel['Chantier']} ({row_sel['Date']})")
 
                     statuts_possibles = ["Présent (Journée)", "1/2 journée", "Absence Autorisée (Congé/Maladie)", "Absence Non Autorisée (Injustifiée)"]
                     idx_st = statuts_possibles.index(row_sel["Statut"]) if row_sel["Statut"] in statuts_possibles else 0
@@ -820,7 +822,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                     col_b1, col_b2 = st.columns(2)
                     with col_b1:
-                        if st.button("💾 Enregistrer la Correction", type="primary", use_container_width=True):
+                        if st.button("💾 Enregistrer Correction", type="primary", use_container_width=True):
                             if "Présent" in mod_statut:
                                 base_p = 40.0
                                 pts_prod = 40.0 if (mod_unite == "Sans métrage" or mod_qte >= 30) else (30.0 if mod_qte >= 20 else 15.0)
@@ -842,22 +844,22 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             """, (mod_statut, mod_tache, mod_qte, mod_unite, mod_apprec, mod_obs, score_corr, pt_id))
                             conn.commit()
                             conn.close()
-                            st.session_state["sync_notif"] = f"✅ Pointage #{pt_id} rectifié avec succès !"
+                            st.session_state["sync_notif"] = f"✅ Pointage #{pt_id} rectifié !"
                             st.rerun()
 
                     with col_b2:
-                        if st.button("🗑️ Supprimer ce pointage", type="secondary", use_container_width=True):
+                        if st.button("🗑️ Supprimer Pointage", type="secondary", use_container_width=True):
                             conn = get_db_connection()
                             c = conn.cursor()
                             c.execute("DELETE FROM pointages WHERE id = ?", (pt_id,))
                             conn.commit()
                             conn.close()
-                            st.session_state["sync_notif"] = f"🗑️ Pointage #{pt_id} supprimé du registre."
+                            st.session_state["sync_notif"] = f"🗑️ Pointage #{pt_id} supprimé."
                             st.rerun()
 
-            # 3. MODULE TRANSFERT RAPIDE
+            # 3. TRANSFÉRER UN OUVRIER
             elif mod_actuel == "mod_transfert":
-                st.markdown("### 🔄 Transférer Ouvrier vers un autre Chantier")
+                st.markdown("### 🔄 Transférer un Ouvrier")
                 df_w_tr = get_workers_df()
                 ouv_sel = st.selectbox("Ouvrier à transférer :", df_w_tr["nom"].tolist(), key="tr_o_prio")
                 infos = df_w_tr[df_w_tr["nom"] == ouv_sel].iloc[0]
@@ -873,9 +875,9 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.session_state["sync_notif"] = f"🔄 {ouv_sel} transféré vers {dest_ch} !"
                     st.rerun()
 
-            # 4. MODULE EQUIPES
+            # 4. ÉQUIPES PAR CHANTIER
             elif mod_actuel == "mod_equipes":
-                st.markdown("### ⚡ Équipe par Chantier")
+                st.markdown("### ⚡ Équipes par Chantier")
                 ch_cible = st.selectbox("Chantier :", [c for c in get_all_chantiers() if c != "EN ATTENTE / DEPOT"], key="ch_eq_cfg")
                 df_w_eq = get_workers_df()
                 actuels = df_w_eq[df_w_eq["chantier_fixe"] == ch_cible]["nom"].tolist()
@@ -894,9 +896,9 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.session_state["sync_notif"] = f"🔄 Équipe de {ch_cible} verrouillée ({len(nouv_eq)} ouvriers) !"
                     st.rerun()
 
-            # 5. MODULE CHANTIERS CONDUCTEURS
+            # 5. AFFECTER LES CHANTIERS
             elif mod_actuel == "mod_chantiers_cond":
-                st.markdown("### 👷 Affectation des Chantiers par Conducteur")
+                st.markdown("### 👷 Affecter les Chantiers")
                 ch_dispos = [c for c in get_all_chantiers() if c != "EN ATTENTE / DEPOT"]
                 
                 st.markdown(f"**{nom_c1}**")
@@ -918,16 +920,16 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         c.execute("INSERT INTO conducteur_chantiers (conducteur_tag, chantier) VALUES ('c2', ?)", (ch,))
                     conn.commit()
                     conn.close()
-                    st.session_state["sync_notif"] = "🔄 Affectations conducteurs sauvegardées !"
+                    st.session_state["sync_notif"] = "🔄 Affectations sauvegardées !"
                     st.rerun()
 
-            # 6. MODULE PROFILS & PHOTOS
+            # 6. PROFILS & PHOTOS
             elif mod_actuel == "mod_profils":
-                st.markdown("### 👥 Gestion des Profils & Photos")
+                st.markdown("### 👥 Profils & Photos")
                 tab_cond, tab_ouv = st.tabs(["👷 Conducteurs", "👷 Ouvriers"])
 
                 with tab_cond:
-                    c_tag = st.radio("Conducteur à modifier :", ["c1", "c2"], format_func=lambda x: f"Conducteur 1 ({nom_c1})" if x == 'c1' else f"Conducteur 2 ({nom_c2})")
+                    c_tag = st.radio("Conducteur :", ["c1", "c2"], format_func=lambda x: f"Conducteur 1 ({nom_c1})" if x == 'c1' else f"Conducteur 2 ({nom_c2})")
                     n_act = nom_c1 if c_tag == 'c1' else nom_c2
                     ph_c = get_photo_path(c_tag)
                     if ph_c:
@@ -965,7 +967,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         n_nom_o = st.text_input("Nom complet :", value=o_sel, key=f"in_no_{o_sel}_cfg")
                         n_ph_o = st.file_uploader("Photo profil ouvrier :", type=["jpg", "jpeg", "png"], key=f"up_po_{o_sel}_cfg")
 
-                        if st.button("💾 Enregistrer les Modifications", type="primary", use_container_width=True):
+                        if st.button("💾 Enregistrer Modifications", type="primary", use_container_width=True):
                             nom_p = n_nom_o.strip()
                             conn = get_db_connection()
                             c = conn.cursor()
@@ -1011,7 +1013,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                     if ph_nouv is not None:
                                         ext = ph_nouv.name.split(".")[-1].lower()
                                         Image.open(ph_nouv).save(os.path.join(PHOTOS_DIR, f"{n_net.replace(' ', '_')}.{ext}"))
-                                    st.session_state["sync_notif"] = f"✅ {n_net} ajouté avec succès !"
+                                    st.session_state["sync_notif"] = f"✅ {n_net} ajouté !"
                                     st.rerun()
                                 except sqlite3.IntegrityError:
                                     conn.close()
@@ -1019,7 +1021,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                     with sub_dl:
                         ouv_del_s = st.selectbox("Ouvrier à supprimer :", df_w_m["nom"].tolist(), key="sel_del_ouv_cfg")
-                        if st.button(f"❌ Supprimer définitivement {ouv_del_s}", type="secondary", use_container_width=True):
+                        if st.button(f"❌ Supprimer Définitivement", type="secondary", use_container_width=True):
                             conn = get_db_connection()
                             c = conn.cursor()
                             c.execute("DELETE FROM workers WHERE nom = ?", (ouv_del_s,))
@@ -1028,9 +1030,9 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             st.session_state["sync_notif"] = f"🗑️ {ouv_del_s} supprimé de la base."
                             st.rerun()
 
-            # 7. MODULE CHANTIERS & CORPS D'ÉTAT
+            # 7. CHANTIERS & TÂCHES
             elif mod_actuel == "mod_chantiers_taches":
-                st.markdown("### 🏗️ Gestion des Chantiers & Corps d'état (Tâches)")
+                st.markdown("### 🏗️ Chantiers & Tâches")
                 tab_ch, tab_tch = st.tabs(["📍 Chantiers", "🔨 Tâches"])
 
                 with tab_ch:
@@ -1042,7 +1044,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             conn = get_db_connection()
                             c = conn.cursor()
                             try:
-                                c.execute("INSERT INTO chantiers_ref (nom) VALUES (?, ?)", (n_c,))
+                                c.execute("INSERT INTO chantiers_ref (nom) VALUES (?)", (n_c,))
                                 conn.commit()
                                 conn.close()
                                 st.session_state["sync_notif"] = f"✅ Chantier {n_c} ajouté !"
@@ -1054,7 +1056,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.markdown("---")
                     ch_a_renom = st.selectbox("Chantier à renommer :", liste_ch, key="sel_mod_ch_cfg")
                     ch_new_n = st.text_input("Nouveau libellé :", value=ch_a_renom, key="in_renom_ch_cfg")
-                    if st.button("💾 Renommer le Chantier", use_container_width=True):
+                    if st.button("💾 Renommer Chantier", use_container_width=True):
                         n_cl = ch_new_n.strip()
                         if n_cl and n_cl != ch_a_renom:
                             conn = get_db_connection()
@@ -1070,12 +1072,12 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 st.rerun()
                             except sqlite3.IntegrityError:
                                 conn.close()
-                                st.error("Existe déjà.")
+                                st.error("Ce nom existe déjà.")
 
                 with tab_tch:
                     liste_tch = get_all_taches()
                     nouvelle_t = st.text_input("Nouvelle tâche :", key="in_add_tch_cfg")
-                    if st.button("➕ Ajouter la Tâche", type="primary", use_container_width=True):
+                    if st.button("➕ Ajouter Tâche", type="primary", use_container_width=True):
                         n_t = nouvelle_t.strip()
                         if n_t:
                             conn = get_db_connection()
@@ -1088,4 +1090,4 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 st.rerun()
                             except sqlite3.IntegrityError:
                                 conn.close()
-                                st.error("Existe déjà.")
+                                st.error("Cette tâche existe déjà.")
