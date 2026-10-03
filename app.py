@@ -577,7 +577,7 @@ elif menu_general == f"👷 Espace {nom_c2}":
     interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# ESPACE ADMIN (TITRES SIMPLES & PROPRES)
+# ESPACE ADMIN (MENU RÉORGANISÉ PAR PRIORITÉ)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
     st.subheader("Accès Sécurisé - Administration")
@@ -607,16 +607,10 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         if "admin_active_module" not in st.session_state:
             st.session_state["admin_active_module"] = None
 
-        # ----------------------------------------------------------------------
-        # TITRES COURTS, SIMPLES ET SANS PARENTHÈSES
-        # ----------------------------------------------------------------------
         MODULES_ADMIN = [
-            # 1. Actions Quotidiennes (Priorités)
             ("mod_rapport", "📊 Bilan Mensuel & Rapports"),
             ("mod_corriger", "✏️ Corriger un Pointage"),
             ("mod_transfert", "🔄 Transférer un Ouvrier"),
-            
-            # 2. Configurations & Éditions de Base
             ("mod_equipes", "⚡ Équipes par Chantier"),
             ("mod_chantiers_cond", "👷 Affecter les Chantiers"),
             ("mod_profils", "👥 Profils & Photos"),
@@ -762,7 +756,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             # 2. CORRIGER UN POINTAGE
             elif mod_actuel == "mod_corriger":
-                st.markdown("### ✏️ Corriger un Pointage")
+                st.markdown("### ✏️️ Corriger un Pointage")
                 
                 conn = get_db_connection()
                 query_admin = """
@@ -875,22 +869,45 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.session_state["sync_notif"] = f"🔄 {ouv_sel} transféré vers {dest_ch} !"
                     st.rerun()
 
-            # 4. ÉQUIPES PAR CHANTIER
+            # 4. ÉQUIPES PAR CHANTIER (AVEC EXCLUSION AUTOMATIQUE DES DÉJÀ AFFECTÉS)
             elif mod_actuel == "mod_equipes":
                 st.markdown("### ⚡ Équipes par Chantier")
-                ch_cible = st.selectbox("Chantier :", [c for c in get_all_chantiers() if c != "EN ATTENTE / DEPOT"], key="ch_eq_cfg")
+                ch_dispos_actifs = [c for c in get_all_chantiers() if c != "EN ATTENTE / DEPOT"]
+                ch_cible = st.selectbox("Chantier à configurer :", ch_dispos_actifs, key="ch_eq_cfg")
+                
                 df_w_eq = get_workers_df()
+                
+                # Ouvriers déjà sur ce chantier
                 actuels = df_w_eq[df_w_eq["chantier_fixe"] == ch_cible]["nom"].tolist()
-                nouv_eq = st.multiselect("Ouvriers affectés :", options=df_w_eq["nom"].tolist(), default=actuels, key=f"ms_eq_{ch_cible}_cfg")
+                
+                # Ouvriers libres (en attente / dépôt)
+                ouvriers_libres = df_w_eq[df_w_eq["chantier_fixe"] == "EN ATTENTE / DEPOT"]["nom"].tolist()
+                
+                # Liste autorisée : uniquement ceux déjà sur ce chantier + ceux qui sont libres
+                options_autorisees = sorted(list(set(actuels + ouvriers_libres)))
+                
+                st.caption(f"💡 `{len(ouvriers_libres)}` ouvrier(s) libre(s) en attente. Les ouvriers travaillant déjà sur un autre chantier sont masqués.")
+                
+                nouv_eq = st.multiselect(
+                    f"Ouvriers travaillant sur {ch_cible} :",
+                    options=options_autorisees,
+                    default=actuels,
+                    key=f"ms_eq_{ch_cible}_cfg"
+                )
 
                 if st.button(f"💾 Verrouiller l'Équipe", type="primary", use_container_width=True):
                     conn = get_db_connection()
                     c = conn.cursor()
+                    
+                    # Les ouvriers retirés de ce chantier retournent automatiquement en statut libre (EN ATTENTE / DEPOT)
                     for nom in actuels:
                         if nom not in nouv_eq:
                             c.execute("UPDATE workers SET chantier_fixe = 'EN ATTENTE / DEPOT' WHERE nom = ?", (nom,))
+                            
+                    # Les ouvriers sélectionnés sont affectés à ce chantier
                     for nom in nouv_eq:
                         c.execute("UPDATE workers SET chantier_fixe = ? WHERE nom = ?", (ch_cible, nom))
+                        
                     conn.commit()
                     conn.close()
                     st.session_state["sync_notif"] = f"🔄 Équipe de {ch_cible} verrouillée ({len(nouv_eq)} ouvriers) !"
@@ -967,7 +984,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         n_nom_o = st.text_input("Nom complet :", value=o_sel, key=f"in_no_{o_sel}_cfg")
                         n_ph_o = st.file_uploader("Photo profil ouvrier :", type=["jpg", "jpeg", "png"], key=f"up_po_{o_sel}_cfg")
 
-                        if st.button("💾 Enregistrer Modifications", type="primary", use_container_width=True):
+                        if st.button("💾 Enregistrer les Modifications", type="primary", use_container_width=True):
                             nom_p = n_nom_o.strip()
                             conn = get_db_connection()
                             c = conn.cursor()
@@ -1013,7 +1030,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                     if ph_nouv is not None:
                                         ext = ph_nouv.name.split(".")[-1].lower()
                                         Image.open(ph_nouv).save(os.path.join(PHOTOS_DIR, f"{n_net.replace(' ', '_')}.{ext}"))
-                                    st.session_state["sync_notif"] = f"✅ {n_net} ajouté !"
+                                    st.session_state["sync_notif"] = f"✅ {n_net} ajouté avec succès !"
                                     st.rerun()
                                 except sqlite3.IntegrityError:
                                     conn.close()
@@ -1044,7 +1061,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             conn = get_db_connection()
                             c = conn.cursor()
                             try:
-                                c.execute("INSERT INTO chantiers_ref (nom) VALUES (?)", (n_c,))
+                                c.execute("INSERT INTO chantiers_ref (nom) VALUES (?, ?)", (n_c,))
                                 conn.commit()
                                 conn.close()
                                 st.session_state["sync_notif"] = f"✅ Chantier {n_c} ajouté !"
@@ -1056,7 +1073,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.markdown("---")
                     ch_a_renom = st.selectbox("Chantier à renommer :", liste_ch, key="sel_mod_ch_cfg")
                     ch_new_n = st.text_input("Nouveau libellé :", value=ch_a_renom, key="in_renom_ch_cfg")
-                    if st.button("💾 Renommer Chantier", use_container_width=True):
+                    if st.button("💾 Renommer le Chantier", use_container_width=True):
                         n_cl = ch_new_n.strip()
                         if n_cl and n_cl != ch_a_renom:
                             conn = get_db_connection()
@@ -1072,12 +1089,12 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 st.rerun()
                             except sqlite3.IntegrityError:
                                 conn.close()
-                                st.error("Ce nom existe déjà.")
+                                st.error("Existe déjà.")
 
                 with tab_tch:
                     liste_tch = get_all_taches()
                     nouvelle_t = st.text_input("Nouvelle tâche :", key="in_add_tch_cfg")
-                    if st.button("➕ Ajouter Tâche", type="primary", use_container_width=True):
+                    if st.button("➕ Ajouter la Tâche", type="primary", use_container_width=True):
                         n_t = nouvelle_t.strip()
                         if n_t:
                             conn = get_db_connection()
@@ -1090,4 +1107,4 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 st.rerun()
                             except sqlite3.IntegrityError:
                                 conn.close()
-                                st.error("Cette tâche existe déjà.")
+                                st.error("Existe déjà.")
