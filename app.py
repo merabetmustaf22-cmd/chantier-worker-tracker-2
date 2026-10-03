@@ -434,6 +434,9 @@ menu_general = st.radio(
     horizontal=False
 )
 
+# ==============================================================================
+# INTERFACE CONDUCTEUR EN 2 ÉTAPES (POINTAGE ➔ PRODUCTION / RENDEMENT)
+# ==============================================================================
 def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     photo_cond = get_photo_path(conducteur_id_tag)
     
@@ -446,7 +449,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     with col_h2:
         st.subheader(f"Pointage — {default_nom}")
 
-    date_choisie = st.date_input("📅 Date", value=date.today(), key=f"date_{conducteur_id_tag}")
+    date_choisie = st.date_input("📅 Date de saisie", value=date.today(), key=f"date_{conducteur_id_tag}")
     chantiers_autorises = get_chantiers_conducteur(conducteur_id_tag)
 
     if not chantiers_autorises:
@@ -467,87 +470,179 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 
     if equipe_active.empty:
         st.warning(f"⚠️ Aucun ouvrier sur {chantier_choisi}.")
-    else:
-        donnees_ouvriers = {}
-        toutes_les_taches = get_all_taches()
+        return
 
+    # Gestion de l'étape courante (1 ou 2)
+    step_key = f"step_{conducteur_id_tag}_{chantier_choisi}"
+    if step_key not in st.session_state:
+        st.session_state[step_key] = 1
+
+    presence_data_key = f"presence_cache_{conducteur_id_tag}_{chantier_choisi}"
+    if presence_data_key not in st.session_state:
+        st.session_state[presence_data_key] = {}
+
+    # --------------------------------------------------------------------------
+    # ÉTAPE 1 : POINTAGE (PRÉSENCE / ABSENCE)
+    # --------------------------------------------------------------------------
+    if st.session_state[step_key] == 1:
+        st.markdown("### 📋 Étape 1 : Pointage & Présence")
+        st.caption("Cochez le statut de chaque ouvrier, puis cliquez sur Suivant.")
+
+        presence_temp = {}
         for _, row in equipe_active.iterrows():
             w_id = row['id']
             w_nom = row['nom']
             photo_p = get_photo_path(w_nom)
 
             st.markdown(f"<div class='worker-card'>", unsafe_allow_html=True)
-            col_av, col_tx = st.columns([1, 4])
-            with col_av:
+            c_av, c_tx = st.columns([1, 4])
+            with c_av:
                 if photo_p:
-                    st.image(photo_p, width=55)
+                    st.image(photo_p, width=50)
                 else:
-                    st.markdown("<div style='font-size:32px;text-align:center;'>👷</div>", unsafe_allow_html=True)
-            with col_tx:
+                    st.markdown("<div style='font-size:30px;text-align:center;'>👷</div>", unsafe_allow_html=True)
+            with c_tx:
                 st.markdown(f"**{w_nom}**")
 
-            st_val = st.selectbox("Statut :", [
-                "Présent (Journée)",
-                "1/2 journée",
-                "Absence Autorisée (Congé/Maladie)",
-                "Absence Non Autorisée (Injustifiée)"
-            ], key=f"st_{conducteur_id_tag}_{w_id}")
+            statut_val = st.selectbox(
+                "Statut présence :",
+                [
+                    "Présent (Journée)",
+                    "1/2 journée",
+                    "Absence Autorisée (Congé/Maladie)",
+                    "Absence Non Autorisée (Injustifiée)"
+                ],
+                key=f"st1_{conducteur_id_tag}_{w_id}"
+            )
 
-            tache_val = "-"
-            qte_val = 0.0
-            unite_val = "-"
-            apprec_val = "-"
-            obs_val = ""
+            motif_abs = ""
+            if "Absence" in statut_val:
+                motif_abs = st.text_input("Motif d'absence :", placeholder="Ex: congé, maladie...", key=f"abs_m_{conducteur_id_tag}_{w_id}")
 
+            st.markdown("</div>", unsafe_allow_html=True)
+            presence_temp[w_id] = {
+                "nom": w_nom,
+                "statut": statut_val,
+                "motif_absence": motif_abs
+            }
+
+        if st.button("➡️ Étape 2 : Production & Travail des Présents", type="primary", use_container_width=True):
+            st.session_state[presence_data_key] = presence_temp
+            st.session_state[step_key] = 2
+            st.rerun()
+
+    # --------------------------------------------------------------------------
+    # ÉTAPE 2 : PRODUCTION & ÉVALUATION (KHADMA TA3 EL KHADDAME)
+    # --------------------------------------------------------------------------
+    elif st.session_state[step_key] == 2:
+        st.markdown("### 🔨 Étape 2 : Tâches, Rendement & Évaluation")
+        st.caption("Saisie uniquement pour les ouvriers présents. Les absents sont validés automatiquement.")
+
+        if st.button("⬅️ Revenir au Pointage (Étape 1)", use_container_width=True):
+            st.session_state[step_key] = 1
+            st.rerun()
+
+        presence_enregistree = st.session_state.get(presence_data_key, {})
+        toutes_les_taches = get_all_taches()
+        donnees_finales = {}
+
+        for _, row in equipe_active.iterrows():
+            w_id = row['id']
+            w_nom = row['nom']
+            infos_p = presence_enregistree.get(w_id, {"statut": "Présent (Journée)", "motif_absence": ""})
+            st_val = infos_p["statut"]
+
+            # Ouvrier présent ou demi-journée
             if "Présent" in st_val or "1/2" in st_val:
-                tache_val = st.selectbox("Tâche / Activité :", toutes_les_taches, key=f"tch_{conducteur_id_tag}_{w_id}")
+                photo_p = get_photo_path(w_nom)
+                st.markdown(f"<div class='worker-card'>", unsafe_allow_html=True)
+                c_av, c_tx = st.columns([1, 4])
+                with c_av:
+                    if photo_p:
+                        st.image(photo_p, width=50)
+                    else:
+                        st.markdown("<div style='font-size:30px;text-align:center;'>👷</div>", unsafe_allow_html=True)
+                with c_tx:
+                    st.markdown(f"**{w_nom}** (`{st_val}`)")
+
+                # TÂCHE / CORPS D'ÉTAT
+                tache_val = st.selectbox("Tâche / Activité :", toutes_les_taches, key=f"tch2_{conducteur_id_tag}_{w_id}")
                 est_bricol_defaut = ("BRICOL" in tache_val.upper()) or (tache_val in ["DIVERS", "nettoyage", "PONSAGE"])
-                type_travail = st.selectbox("Type travail :", ["Métrage (m² / ml)", "Bricol / Sans métrage"], index=1 if est_bricol_defaut else 0, key=f"typ_{conducteur_id_tag}_{w_id}")
+                type_travail = st.selectbox("Type d'activité :", ["Métrage (m² / ml)", "Bricol / Sans métrage"], index=1 if est_bricol_defaut else 0, key=f"typ2_{conducteur_id_tag}_{w_id}")
 
                 if type_travail == "Métrage (m² / ml)":
-                    col_q, col_ap = st.columns(2)
-                    with col_q:
-                        qte_val = st.number_input("Production :", min_value=0.0, step=1.0, value=25.0, key=f"qte_{conducteur_id_tag}_{w_id}")
-                        unite_val = "m²"
-                    with col_ap:
-                        apprec_val = st.selectbox("Qualité :", ["🟢 Conforme / Soigné", "🟡 Moyen / Acceptable", "🔴 Non conforme / À reprendre"], key=f"app_{conducteur_id_tag}_{w_id}")
-                    obs_val = st.text_input("Observation libre :", placeholder="Ex: terrasse sud, relevés...", key=f"obs_{conducteur_id_tag}_{w_id}")
+                    qte_val = st.number_input("Métré réalisé :", min_value=0.0, step=1.0, value=25.0, key=f"qte2_{conducteur_id_tag}_{w_id}")
+                    unite_val = "m²"
                 else:
                     unite_val = "Sans métrage"
                     qte_val = 1.0
-                    apprec_val = st.selectbox("Qualité :", ["🟢 Conforme / Soigné", "🟡 Moyen / Acceptable", "🔴 Non conforme / À reprendre"], key=f"app_br_{conducteur_id_tag}_{w_id}")
-                    obs_val = st.text_input("Détail du bricolage :", placeholder="Ex: regard, solin...", key=f"obs_br_{conducteur_id_tag}_{w_id}")
+
+                # ÉVALUATION DE LA KHADMA DU KHADDAME (ÉVALUATION DU RENDEMENT & QUALITÉ)
+                c_ev1, c_ev2 = st.columns(2)
+                with c_ev1:
+                    eval_khaddame = st.selectbox(
+                        "Khadma ta3 el khaddame :",
+                        [
+                            "🟢 Khaddem mlih bzaf (Excellent)",
+                            "🟢 Mlih (Bon travail)",
+                            "🟡 Moyen / Noss noss",
+                            "🔴 3eyan / À surveiller"
+                        ],
+                        key=f"eval_kh_{conducteur_id_tag}_{w_id}"
+                    )
+                with c_ev2:
+                    apprec_qualite = st.selectbox(
+                        "Contrôle Qualité :",
+                        [
+                            "🟢 Conforme / Soigné",
+                            "🟡 Acceptable",
+                            "🔴 Non conforme / À reprendre"
+                        ],
+                        key=f"qual_{conducteur_id_tag}_{w_id}"
+                    )
+
+                obs_val = st.text_input("Observation libre :", placeholder="Ex: terrasse sud, relevés...", key=f"obs2_{conducteur_id_tag}_{w_id}")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                donnees_finales[w_id] = {
+                    "statut": st_val,
+                    "tache": tache_val,
+                    "quantite": qte_val,
+                    "unite": unite_val,
+                    "appreciation": apprec_qualite,
+                    "observation": f"{eval_khaddame} | {obs_val}" if obs_val else eval_khaddame,
+                    "eval_travailleur": eval_khaddame
+                }
             else:
-                obs_val = st.text_input("Motif absence :", placeholder="Ex: congé, maladie...", key=f"obs_abs_{conducteur_id_tag}_{w_id}")
+                # Ouvrier absent : pas de saisie nécessaire
+                donnees_finales[w_id] = {
+                    "statut": st_val,
+                    "tache": "-",
+                    "quantite": 0.0,
+                    "unite": "-",
+                    "appreciation": "-",
+                    "observation": infos_p.get("motif_absence", ""),
+                    "eval_travailleur": "-"
+                }
 
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            donnees_ouvriers[w_id] = {
-                "statut": st_val,
-                "tache": tache_val,
-                "quantite": qte_val,
-                "unite": unite_val,
-                "appreciation": apprec_val,
-                "observation": obs_val
-            }
-
-        label_bouton = "🔄 Mettre à jour la journée" if deja_fait else "💾 Valider la journée de l'équipe"
-
-        if st.button(label_bouton, type="primary", use_container_width=True, key=f"btn_val_{conducteur_id_tag}"):
+        label_save = "🔄 Mettre à jour la validation" if deja_fait else "💾 Valider définitivement la journée"
+        if st.button(label_save, type="primary", use_container_width=True):
             conn = get_db_connection()
             c = conn.cursor()
 
-            for w_id, d in donnees_ouvriers.items():
+            for w_id, d in donnees_finales.items():
                 st_val = d["statut"]
                 qte = d["quantite"]
                 unite = d["unite"]
                 app = d["appreciation"]
+                eval_kh = d.get("eval_travailleur", "-")
 
                 if "Présent" in st_val:
-                    base_p = 40.0
-                    pts_prod = 40.0 if (unite == "Sans métrage" or qte >= 30) else (30.0 if qte >= 20 else 15.0)
-                    pts_app = 20.0 if "Conforme" in app else (10.0 if "Moyen" in app else (0.0 if "Non conforme" in app else 10.0))
-                    score = min(base_p + pts_prod + pts_app, 100.0)
+                    base_p = 35.0
+                    pts_prod = 35.0 if (unite == "Sans métrage" or qte >= 30) else (25.0 if qte >= 20 else 15.0)
+                    pts_app = 20.0 if "Conforme" in app else (10.0 if "Acceptable" in app else 0.0)
+                    pts_khadma = 10.0 if "Excellent" in eval_kh else (8.0 if "Bon" in eval_kh else (4.0 if "Moyen" in eval_kh else 0.0))
+                    score = min(base_p + pts_prod + pts_app + pts_khadma, 100.0)
                 elif "1/2" in st_val:
                     score = 35.0
                 elif "Autorisée" in st_val:
@@ -563,8 +658,8 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             conn.commit()
             conn.close()
 
-            heure_validation = datetime.now().strftime("%H:%M:%S")
-            st.session_state["sync_notif"] = f"✅ Journée validée par {default_nom} à {heure_validation} pour {chantier_choisi} !"
+            st.session_state[step_key] = 1
+            st.session_state["sync_notif"] = f"✅ Journée validée pour {chantier_choisi} !"
             st.rerun()
 
 # ==============================================================================
@@ -577,7 +672,7 @@ elif menu_general == f"👷 Espace {nom_c2}":
     interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# ESPACE ADMIN (MENU RÉORGANISÉ PAR PRIORITÉ)
+# ESPACE ADMIN
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
     st.subheader("Accès Sécurisé - Administration")
@@ -619,7 +714,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
         if st.session_state["admin_active_module"] is None:
             st.markdown("### 🎛 Menu Administrateur")
-            
             st.markdown("##### ⚡ Actions Quotidiennes")
             for tag, titre in MODULES_ADMIN[:3]:
                 if st.button(titre, key=f"btn_case_{tag}", use_container_width=True):
@@ -727,7 +821,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         lambda r: "Bricol" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-"),
                         axis=1
                     )
-                    cols_finales = ["Chantier", "Date", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Score"]
+                    cols_finales = ["Chantier", "Date", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Observation", "Score"]
                     st.dataframe(df_vue_detail[cols_finales], use_container_width=True, hide_index=True)
 
                     st.markdown("#### 📥 Téléchargements")
@@ -756,7 +850,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             # 2. CORRIGER UN POINTAGE
             elif mod_actuel == "mod_corriger":
-                st.markdown("### ✏️️ Corriger un Pointage")
+                st.markdown("### ✏️ Corriger un Pointage")
                 
                 conn = get_db_connection()
                 query_admin = """
@@ -808,7 +902,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         mod_qte = 1.0
                         mod_unite = "Sans métrage"
 
-                    qualites_possibles = ["🟢 Conforme / Soigné", "🟡 Moyen / Acceptable", "🔴 Non conforme / À reprendre"]
+                    qualites_possibles = ["🟢 Conforme / Soigné", "🟡 Acceptable", "🔴 Non conforme / À reprendre"]
                     idx_qual = qualites_possibles.index(row_sel["Qualité"]) if row_sel["Qualité"] in qualites_possibles else 0
                     mod_apprec = st.selectbox("Qualité :", qualites_possibles, index=idx_qual, key=f"mod_qual_{pt_id}")
 
@@ -820,7 +914,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             if "Présent" in mod_statut:
                                 base_p = 40.0
                                 pts_prod = 40.0 if (mod_unite == "Sans métrage" or mod_qte >= 30) else (30.0 if mod_qte >= 20 else 15.0)
-                                pts_app = 20.0 if "Conforme" in mod_apprec else (10.0 if "Moyen" in mod_apprec else (0.0 if "Non conforme" in mod_apprec else 10.0))
+                                pts_app = 20.0 if "Conforme" in mod_apprec else (10.0 if "Acceptable" in mod_apprec else 0.0)
                                 score_corr = min(base_p + pts_prod + pts_app, 100.0)
                             elif "1/2" in mod_statut:
                                 score_corr = 35.0
@@ -869,27 +963,21 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.session_state["sync_notif"] = f"🔄 {ouv_sel} transféré vers {dest_ch} !"
                     st.rerun()
 
-            # 4. ÉQUIPES PAR CHANTIER (AVEC EXCLUSION AUTOMATIQUE DES DÉJÀ AFFECTÉS)
+            # 4. ÉQUIPES PAR CHANTIER (EXCLUSION AUTOMATIQUE DES AFFECTÉS)
             elif mod_actuel == "mod_equipes":
                 st.markdown("### ⚡ Équipes par Chantier")
                 ch_dispos_actifs = [c for c in get_all_chantiers() if c != "EN ATTENTE / DEPOT"]
                 ch_cible = st.selectbox("Chantier à configurer :", ch_dispos_actifs, key="ch_eq_cfg")
                 
                 df_w_eq = get_workers_df()
-                
-                # Ouvriers déjà sur ce chantier
                 actuels = df_w_eq[df_w_eq["chantier_fixe"] == ch_cible]["nom"].tolist()
-                
-                # Ouvriers libres (en attente / dépôt)
                 ouvriers_libres = df_w_eq[df_w_eq["chantier_fixe"] == "EN ATTENTE / DEPOT"]["nom"].tolist()
-                
-                # Liste autorisée : uniquement ceux déjà sur ce chantier + ceux qui sont libres
                 options_autorisees = sorted(list(set(actuels + ouvriers_libres)))
                 
-                st.caption(f"💡 `{len(ouvriers_libres)}` ouvrier(s) libre(s) en attente. Les ouvriers travaillant déjà sur un autre chantier sont masqués.")
+                st.caption(f"💡 `{len(ouvriers_libres)}` ouvrier(s) libre(s). Les ouvriers déjà affectés ailleurs sont masqués.")
                 
                 nouv_eq = st.multiselect(
-                    f"Ouvriers travaillant sur {ch_cible} :",
+                    f"Ouvriers sur {ch_cible} :",
                     options=options_autorisees,
                     default=actuels,
                     key=f"ms_eq_{ch_cible}_cfg"
@@ -898,19 +986,14 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                 if st.button(f"💾 Verrouiller l'Équipe", type="primary", use_container_width=True):
                     conn = get_db_connection()
                     c = conn.cursor()
-                    
-                    # Les ouvriers retirés de ce chantier retournent automatiquement en statut libre (EN ATTENTE / DEPOT)
                     for nom in actuels:
                         if nom not in nouv_eq:
                             c.execute("UPDATE workers SET chantier_fixe = 'EN ATTENTE / DEPOT' WHERE nom = ?", (nom,))
-                            
-                    # Les ouvriers sélectionnés sont affectés à ce chantier
                     for nom in nouv_eq:
                         c.execute("UPDATE workers SET chantier_fixe = ? WHERE nom = ?", (ch_cible, nom))
-                        
                     conn.commit()
                     conn.close()
-                    st.session_state["sync_notif"] = f"🔄 Équipe de {ch_cible} verrouillée ({len(nouv_eq)} ouvriers) !"
+                    st.session_state["sync_notif"] = f"🔄 Équipe de {ch_cible} enregistrée ({len(nouv_eq)} ouvriers) !"
                     st.rerun()
 
             # 5. AFFECTER LES CHANTIERS
@@ -984,7 +1067,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         n_nom_o = st.text_input("Nom complet :", value=o_sel, key=f"in_no_{o_sel}_cfg")
                         n_ph_o = st.file_uploader("Photo profil ouvrier :", type=["jpg", "jpeg", "png"], key=f"up_po_{o_sel}_cfg")
 
-                        if st.button("💾 Enregistrer les Modifications", type="primary", use_container_width=True):
+                        if st.button("💾 Enregistrer Modifications", type="primary", use_container_width=True):
                             nom_p = n_nom_o.strip()
                             conn = get_db_connection()
                             c = conn.cursor()
@@ -1017,7 +1100,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     with sub_ad:
                         nom_nouv = st.text_input("Nom et prénom :", key="in_add_w_nom_cfg")
                         ch_init = st.selectbox("Chantier initial :", get_all_chantiers(), key="in_add_w_ch_cfg")
-                        ph_nouv = st.file_uploader("Photo profil :", type=["jpg", "jpeg", "png"], key="in_add_w_ph_cfg")
+                        ph_nouv = st.file_uploader("Photo profil :", type=["jpg", "jpeg", "png"], key=in_add_w_ph_cfg)
                         if st.button("➕ Ajouter l'Ouvrier", type="primary", use_container_width=True):
                             n_net = nom_nouv.strip()
                             if n_net:
@@ -1030,7 +1113,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                     if ph_nouv is not None:
                                         ext = ph_nouv.name.split(".")[-1].lower()
                                         Image.open(ph_nouv).save(os.path.join(PHOTOS_DIR, f"{n_net.replace(' ', '_')}.{ext}"))
-                                    st.session_state["sync_notif"] = f"✅ {n_net} ajouté avec succès !"
+                                    st.session_state["sync_notif"] = f"✅ {n_net} ajouté !"
                                     st.rerun()
                                 except sqlite3.IntegrityError:
                                     conn.close()
@@ -1044,7 +1127,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             c.execute("DELETE FROM workers WHERE nom = ?", (ouv_del_s,))
                             conn.commit()
                             conn.close()
-                            st.session_state["sync_notif"] = f"🗑️ {ouv_del_s} supprimé de la base."
+                            st.session_state["sync_notif"] = f"🗑️️ {ouv_del_s} supprimé de la base."
                             st.rerun()
 
             # 7. CHANTIERS & TÂCHES
@@ -1061,7 +1144,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             conn = get_db_connection()
                             c = conn.cursor()
                             try:
-                                c.execute("INSERT INTO chantiers_ref (nom) VALUES (?, ?)", (n_c,))
+                                c.execute("INSERT INTO chantiers_ref (nom) VALUES (?)", (n_c,))
                                 conn.commit()
                                 conn.close()
                                 st.session_state["sync_notif"] = f"✅ Chantier {n_c} ajouté !"
@@ -1073,7 +1156,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.markdown("---")
                     ch_a_renom = st.selectbox("Chantier à renommer :", liste_ch, key="sel_mod_ch_cfg")
                     ch_new_n = st.text_input("Nouveau libellé :", value=ch_a_renom, key="in_renom_ch_cfg")
-                    if st.button("💾 Renommer le Chantier", use_container_width=True):
+                    if st.button("💾 Renommer Chantier", use_container_width=True):
                         n_cl = ch_new_n.strip()
                         if n_cl and n_cl != ch_a_renom:
                             conn = get_db_connection()
@@ -1089,12 +1172,12 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 st.rerun()
                             except sqlite3.IntegrityError:
                                 conn.close()
-                                st.error("Existe déjà.")
+                                st.error("Ce nom existe déjà.")
 
                 with tab_tch:
                     liste_tch = get_all_taches()
                     nouvelle_t = st.text_input("Nouvelle tâche :", key="in_add_tch_cfg")
-                    if st.button("➕ Ajouter la Tâche", type="primary", use_container_width=True):
+                    if st.button("➕ Ajouter Tâche", type="primary", use_container_width=True):
                         n_t = nouvelle_t.strip()
                         if n_t:
                             conn = get_db_connection()
@@ -1107,4 +1190,4 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 st.rerun()
                             except sqlite3.IntegrityError:
                                 conn.close()
-                                st.error("Existe déjà.")
+                                st.error("Cette tâche existe déjà.")
