@@ -221,9 +221,10 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     GRIS_TOTAL = "E2E8F0"
     BORDER_COLOR = "CBD5E1"
     
-    # Couleurs du thème de l'application
+    # Couleurs du thème
     VERT_BG, VERT_TXT = "DCFCE7", "166534"
     JAUNE_BG, JAUNE_TXT = "FEF9C3", "854D0E"
+    ORANGE_BG, ORANGE_TXT = "FFEDD5", "C2410C"
     ROUGE_BG, ROUGE_TXT = "FEE2E2", "991B1B"
     
     font_titre = Font(name="Segoe UI", size=13, bold=True, color="FFFFFF")
@@ -318,10 +319,10 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         "A": 14,
         "B": 18,
         "C": 26,
-        "D": 20,
+        "D": 22,
         "E": 28,
         "F": 16,
-        "G": 24,
+        "G": 22,
         "H": 38,
         "I": 12,
     }
@@ -370,9 +371,9 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         for _, r in grp.iterrows():
             prod_aff = "Bricolage" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
             
-            # Nettoyage de '(Journée)' et des symboles
-            statut_aff = str(r["Statut"]).replace("(Journée)", "").replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
-            qual_clean = str(r["Qualité"]).replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
+            # Nettoyage des parenthèses et des emojis
+            statut_aff = str(r["Statut"]).replace("(Journée)", "").replace("(Congé/Maladie)", "").replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
+            qual_clean = str(r["Qualité"]).replace("/ À reprendre", "").replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
             obs_clean = str(r["Observation"]).replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
             
             vals = [
@@ -389,7 +390,6 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
                 c.border = cell_border
                 c.fill = c_fill_defaut
                 
-                # Alignements
                 if col_idx in [1, 4, 7, 9]:
                     c.alignment = Alignment(horizontal="center", vertical="center")
                 elif col_idx == 6:
@@ -397,7 +397,6 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
                 else:
                     c.alignment = Alignment(horizontal="left", vertical="center")
                 
-                # COLORATION SELON LE THÈME DE L'APPLICATION
                 # 1. Statut (Colonne 4)
                 if col_idx == 4:
                     if "Présent" in statut_aff:
@@ -406,19 +405,24 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
                     elif "1/2" in statut_aff:
                         c.fill = PatternFill(start_color=JAUNE_BG, end_color=JAUNE_BG, fill_type="solid")
                         c.font = Font(name="Segoe UI", size=9, bold=True, color=JAUNE_TXT)
+                    elif "Autorisée" in statut_aff:
+                        # Orange pour l'absence autorisée
+                        c.fill = PatternFill(start_color=ORANGE_BG, end_color=ORANGE_BG, fill_type="solid")
+                        c.font = Font(name="Segoe UI", size=9, bold=True, color=ORANGE_TXT)
                     elif "Absence" in statut_aff:
+                        # Rouge pour absence injustifiée
                         c.fill = PatternFill(start_color=ROUGE_BG, end_color=ROUGE_BG, fill_type="solid")
                         c.font = Font(name="Segoe UI", size=9, bold=True, color=ROUGE_TXT)
                         
                 # 2. Contrôle Qualité (Colonne 7)
                 elif col_idx == 7:
-                    if "Conforme" in qual_clean:
+                    if "Conforme" in qual_clean and "Non" not in qual_clean:
                         c.fill = PatternFill(start_color=VERT_BG, end_color=VERT_BG, fill_type="solid")
                         c.font = Font(name="Segoe UI", size=9, bold=True, color=VERT_TXT)
                     elif "Acceptable" in qual_clean:
                         c.fill = PatternFill(start_color=JAUNE_BG, end_color=JAUNE_BG, fill_type="solid")
                         c.font = Font(name="Segoe UI", size=9, bold=True, color=JAUNE_TXT)
-                    elif "Non conforme" in qual_clean or "reprendre" in qual_clean:
+                    elif "Non conforme" in qual_clean:
                         c.fill = PatternFill(start_color=ROUGE_BG, end_color=ROUGE_BG, fill_type="solid")
                         c.font = Font(name="Segoe UI", size=9, bold=True, color=ROUGE_TXT)
                         
@@ -544,7 +548,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                 [
                     "Présent",
                     "1/2 journée",
-                    "Absence Autorisée (Congé/Maladie)",
+                    "Absence Autorisée",
                     "Absence Non Autorisée (Injustifiée)"
                 ],
                 key=f"st1_{conducteur_id_tag}_{w_id}"
@@ -625,7 +629,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                         [
                             "Conforme / Soigné",
                             "Acceptable",
-                            "Non conforme / À reprendre"
+                            "Non conforme"
                         ],
                         key=f"qual_{conducteur_id_tag}_{w_id}"
                     )
@@ -668,7 +672,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                 if "Présent" in st_val:
                     base_p = 35.0
                     pts_prod = 35.0 if (unite == "Sans métrage" or qte >= 30) else (25.0 if qte >= 20 else 15.0)
-                    pts_app = 20.0 if "Conforme" in app else (10.0 if "Acceptable" in app else 0.0)
+                    pts_app = 20.0 if "Conforme" in app and "Non" not in app else (10.0 if "Acceptable" in app else 0.0)
                     pts_w = 10.0 if "Excellent" in eval_w else (8.0 if "Régulier" in eval_w else (4.0 if "Moyen" in eval_w else 0.0))
                     score = min(base_p + pts_prod + pts_app + pts_w, 100.0)
                 elif "1/2" in st_val:
@@ -726,7 +730,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
         MODULES_ADMIN = [
             ("mod_rapport", "📊 Bilan Mensuel & Rapports"),
-            ("mod_corriger", "✏️ Corriger un Pointage"),
+            ("mod_corriger", "✏️️ Corriger un Pointage"),
             ("mod_transfert", "🔄 Transférer un Ouvrier"),
             ("mod_equipes", "⚡ Équipes par Chantier"),
             ("mod_chantiers_cond", "👷 Affecter les Chantiers"),
@@ -893,7 +897,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                     st.info(f"**{row_sel['Ouvrier']}** — {row_sel['Chantier']} ({row_sel['Date']})")
 
-                    statuts_possibles = ["Présent", "1/2 journée", "Absence Autorisée (Congé/Maladie)", "Absence Non Autorisée (Injustifiée)"]
+                    statuts_possibles = ["Présent", "1/2 journée", "Absence Autorisée", "Absence Non Autorisée (Injustifiée)"]
                     idx_st = statuts_possibles.index(row_sel["Statut"]) if row_sel["Statut"] in statuts_possibles else 0
                     mod_statut = st.selectbox("Statut :", statuts_possibles, index=idx_st, key=f"mod_st_{pt_id}")
                     
@@ -909,8 +913,8 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         mod_qte = 1.0
                         mod_unite = "Sans métrage"
 
-                    qualites_possibles = ["Conforme / Soigné", "Acceptable", "Non conforme / À reprendre"]
-                    clean_qual_existante = str(row_sel["Qualité"]).replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
+                    qualites_possibles = ["Conforme / Soigné", "Acceptable", "Non conforme"]
+                    clean_qual_existante = str(row_sel["Qualité"]).replace("/ À reprendre", "").replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
                     idx_qual = 0
                     for idx_q, q_label in enumerate(qualites_possibles):
                         if clean_qual_existante in q_label or q_label in clean_qual_existante:
@@ -926,7 +930,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             if "Présent" in mod_statut:
                                 base_p = 40.0
                                 pts_prod = 40.0 if (mod_unite == "Sans métrage" or mod_qte >= 30) else (30.0 if mod_qte >= 20 else 15.0)
-                                pts_app = 20.0 if "Conforme" in mod_apprec else (10.0 if "Acceptable" in mod_apprec else 0.0)
+                                pts_app = 20.0 if "Conforme" in mod_apprec and "Non" not in mod_apprec else (10.0 if "Acceptable" in mod_apprec else 0.0)
                                 score_corr = min(base_p + pts_prod + pts_app, 100.0)
                             elif "1/2" in mod_statut:
                                 score_corr = 35.0
@@ -954,7 +958,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             c.execute("DELETE FROM pointages WHERE id = ?", (pt_id,))
                             conn.commit()
                             conn.close()
-                            st.session_state["sync_notif"] = f"🗑️ Pointage #{pt_id} supprimé."
+                            st.session_state["sync_notif"] = f"🗑️️ Pointage #{pt_id} supprimé."
                             st.rerun()
 
             elif mod_actuel == "mod_transfert":
@@ -1158,7 +1162,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 st.rerun()
                             except sqlite3.IntegrityError:
                                 conn.close()
-                                st.error("Ce chantier existe déjà.")
+                                st.error("Ce nom existe déjà.")
 
                     st.markdown("---")
                     ch_a_renom = st.selectbox("Chantier à renommer :", liste_ch, key="sel_mod_ch_cfg")
