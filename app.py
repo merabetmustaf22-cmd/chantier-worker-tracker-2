@@ -215,232 +215,257 @@ def get_photo_path(identifiant):
             return p
     return None
 
-def generer_fichier_excel_design_couleurs(df_data):
-    """Génère un rapport Excel haut de gamme avec palette de couleurs, cartouche KPI et formatage conditionnel."""
+# ==============================================================================
+# GÉNÉRATEUR EXCEL MENSUEL MULTI-FEUILLES (AVEC TOTAUX AUTOMATIQUES)
+# ==============================================================================
+def generer_classeur_mensuel_complet(df_mois, mois_label):
     if not OPENPYXL_DISPO:
         return None
 
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Rapport Activité"
-    ws.views.sheetView[0].showGridLines = True
-
-    # Palette de couleurs professionnelle
-    C_HEADER_TOP = "1B365D"       # Bleu nuit profond
-    C_HEADER_TABLE = "2C4D75"     # Bleu acier foncé
-    C_ZEBRA = "F7F9FC"            # Gris très pâle bleuté
-    C_BORDER = "D1D5DB"           # Gris clair bordure
-
-    # Couleurs de statut
-    C_VERT_BG = "E6F4EA"          # Présent / Conforme
-    C_VERT_TXT = "137333"
-    C_JAUNE_BG = "FEF7E0"         # 1/2 journée / Moyen
-    C_JAUNE_TXT = "B06000"
-    C_ROUGE_BG = "FCE8E6"         # Absence / Non conforme
-    C_ROUGE_TXT = "C5221F"
-    C_SCORE_HAUT = "D4EDDA"       # Vert clair
-    C_SCORE_MOY = "FFF3CD"        # Jaune ambre
-
+    
+    # Couleurs du thème
+    BLEU_TITRE = "0F2537"
+    BLEU_HEADER = "1E3A5F"
+    BLEU_TOTAL = "E2E8F0"
+    GRIS_ZEBRA = "F8FAFC"
+    BORDURE_COLOR = "CBD5E1"
+    
     thin_border = Border(
-        left=Side(style='thin', color=C_BORDER),
-        right=Side(style='thin', color=C_BORDER),
-        top=Side(style='thin', color=C_BORDER),
-        bottom=Side(style='thin', color=C_BORDER)
+        left=Side(style='thin', color=BORDURE_COLOR),
+        right=Side(style='thin', color=BORDURE_COLOR),
+        top=Side(style='thin', color=BORDURE_COLOR),
+        bottom=Side(style='thin', color=BORDURE_COLOR)
     )
 
-    # 1. En-tête principal
-    ws.merge_cells("A1:J1")
-    title_cell = ws["A1"]
-    title_cell.value = "SUIVI QUOTIDIEN DE CHANTIER — TRAVAUX D'ÉTANCHÉITÉ"
-    title_cell.font = Font(name="Segoe UI", size=15, bold=True, color="FFFFFF")
-    title_cell.fill = PatternFill(start_color=C_HEADER_TOP, end_color=C_HEADER_TOP, fill_type="solid")
-    title_cell.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[1].height = 42
+    # -------------------------------------------------------------
+    # FEUILLE 1 : SYNTHÈSE MENSUELLE OUVRIERS (PAIE & RH)
+    # -------------------------------------------------------------
+    ws1 = wb.active
+    ws1.title = "Synthèse Mensuelle RH"
+    ws1.views.sheetView[0].showGridLines = True
 
-    # 2. Cartouches d'indicateurs clés (KPIs)
-    total_lignes = len(df_data)
-    presents_cnt = sum(1 for v in df_data["Statut"] if "Présent" in str(v))
-    demi_cnt = sum(1 for v in df_data["Statut"] if "1/2" in str(v))
-    absents_cnt = sum(1 for v in df_data["Statut"] if "Absence" in str(v))
+    ws1.merge_cells("A1:H1")
+    ws1["A1"] = f"BILAN MENSUEL DES POINTAGES & EFFECTIFS — {mois_label.upper()}"
+    ws1["A1"].font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
+    ws1["A1"].fill = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
+    ws1["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws1.row_dimensions[1].height = 36
 
-    kpi_configs = [
-        ("A3:B3", "A4:B4", "TOTAL OUVRIERS", str(total_lignes), "E8EEF5", "1B365D"),
-        ("D3:E3", "D4:E4", "PRÉSENTS (Jour)", f"{presents_cnt}", "E6F4EA", "137333"),
-        ("G3:H3", "G4:H4", "1/2 JOURNÉES", f"{demi_cnt}", "FEF7E0", "B06000"),
-        ("I3:J3", "I4:J4", "ABSENCES", f"{absents_cnt}", "FCE8E6", "C5221F"),
+    headers_rh = [
+        "Nom Ouvrier", "Dernier Chantier", "Jours Présents (1.0)", "1/2 Journées (0.5)", 
+        "Absences", "Total Jours Payés", "Taux Présence", "Score Moyen"
     ]
+    ws1.append([])
+    ws1.append(headers_rh)
+    ws1.row_dimensions[3].height = 26
 
-    for label_range, val_range, lbl, val, bg_color, txt_color in kpi_configs:
-        ws.merge_cells(label_range)
-        top_cell = ws[label_range.split(":")[0]]
-        top_cell.value = lbl
-        top_cell.font = Font(name="Segoe UI", size=8, bold=True, color="6B7280")
-        top_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
-        top_cell.alignment = Alignment(horizontal="center", vertical="center")
+    for col_i in range(1, len(headers_rh) + 1):
+        cell = ws1.cell(row=3, column=col_i)
+        cell.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color=BLEU_HEADER, end_color=BLEU_HEADER, fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = thin_border
 
-        ws.merge_cells(val_range)
-        bottom_cell = ws[val_range.split(":")[0]]
-        bottom_cell.value = val
-        bottom_cell.font = Font(name="Segoe UI", size=14, bold=True, color=txt_color)
-        bottom_cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
-        bottom_cell.alignment = Alignment(horizontal="center", vertical="center")
+    # Calcul des totaux par ouvrier
+    ouvriers_group = df_mois.groupby("Ouvrier")
+    row_cur = 4
+    total_pres_sum = 0
+    total_demi_sum = 0
+    total_abs_sum = 0
+    total_paye_sum = 0.0
 
-    ws.row_dimensions[3].height = 16
-    ws.row_dimensions[4].height = 24
-    ws.row_dimensions[5].height = 10
+    for nom_ouv, grp in ouvriers_group:
+        p_count = sum(1 for v in grp["Statut"] if "Présent" in str(v))
+        d_count = sum(1 for v in grp["Statut"] if "1/2" in str(v))
+        a_count = sum(1 for v in grp["Statut"] if "Absence" in str(v))
+        j_payes = p_count + (d_count * 0.5)
+        
+        total_presents_possible = p_count + d_count + a_count
+        taux_pres = f"{(j_payes / total_presents_possible * 100):.1f}%" if total_presents_possible > 0 else "0%"
+        
+        scores_valides = pd.to_numeric(grp["Score"], errors='coerce').dropna()
+        score_moy = f"{scores_valides.mean():.1f}" if not scores_valides.empty else "-"
+        dernier_ch = grp["Chantier"].iloc[-1] if not grp.empty else "-"
 
-    # 3. Tableau de données (En-têtes ligne 6)
-    headers = list(df_data.columns)
-    ws.append(headers)
-    ws.row_dimensions[6].height = 28
+        vals = [nom_ouv, dernier_ch, p_count, d_count, a_count, j_payes, taux_pres, score_moy]
+        ws1.append(vals)
+        ws1.row_dimensions[row_cur].height = 20
 
-    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color=C_HEADER_TABLE, end_color=C_HEADER_TABLE, fill_type="solid")
+        is_even = (row_cur % 2 == 0)
+        fill_c = PatternFill(start_color=GRIS_ZEBRA if is_even else "FFFFFF", end_color=GRIS_ZEBRA if is_even else "FFFFFF", fill_type="solid")
 
-    for col_idx in range(1, len(headers) + 1):
-        c = ws.cell(row=6, column=col_idx)
-        c.font = header_font
-        c.fill = header_fill
-        c.alignment = Alignment(horizontal="center", vertical="center")
-        c.border = thin_border
-
-    # 4. Insertion des lignes avec mise en forme conditionnelle
-    zebra_fill = PatternFill(start_color=C_ZEBRA, end_color=C_ZEBRA, fill_type="solid")
-    regular_font = Font(name="Segoe UI", size=9)
-
-    for row_idx, row_values in enumerate(df_data.itertuples(index=False), start=7):
-        ws.append(list(row_values))
-        ws.row_dimensions[row_idx].height = 22
-        is_even = (row_idx % 2 == 0)
-
-        for col_idx in range(1, len(headers) + 1):
-            cell = ws.cell(row=row_idx, column=col_idx)
-            cell.font = regular_font
-            cell.border = thin_border
-            if is_even:
-                cell.fill = zebra_fill
-
-            val_str = str(cell.value or "")
-
-            # Alignements par colonne
-            if col_idx in [1, 5, 8, 10]:  # Date, Statut, Qualité, Score
-                cell.alignment = Alignment(horizontal="center", vertical="center")
-            elif col_idx == 7:           # Production
-                cell.alignment = Alignment(horizontal="right", vertical="center")
+        for c_i in range(1, len(headers_rh) + 1):
+            c = ws1.cell(row=row_cur, column=c_i)
+            c.font = Font(name="Calibri", size=9)
+            c.border = thin_border
+            c.fill = fill_c
+            if c_i in [3, 4, 5, 6, 7, 8]:
+                c.alignment = Alignment(horizontal="center", vertical="center")
             else:
-                cell.alignment = Alignment(horizontal="left", vertical="center")
+                c.alignment = Alignment(horizontal="left", vertical="center")
 
-            # Col 5 : Statut
-            if col_idx == 5:
-                if "Présent" in val_str:
-                    cell.fill = PatternFill(start_color=C_VERT_BG, end_color=C_VERT_BG, fill_type="solid")
-                    cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_VERT_TXT)
-                elif "1/2" in val_str:
-                    cell.fill = PatternFill(start_color=C_JAUNE_BG, end_color=C_JAUNE_BG, fill_type="solid")
-                    cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_JAUNE_TXT)
-                elif "Absence" in val_str:
-                    cell.fill = PatternFill(start_color=C_ROUGE_BG, end_color=C_ROUGE_BG, fill_type="solid")
-                    cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_ROUGE_TXT)
+        total_pres_sum += p_count
+        total_demi_sum += d_count
+        total_abs_sum += a_count
+        total_paye_sum += j_payes
+        row_cur += 1
 
-            # Col 8 : Qualité d'exécution
-            elif col_idx == 8:
-                if "Conforme" in val_str:
-                    cell.fill = PatternFill(start_color=C_VERT_BG, end_color=C_VERT_BG, fill_type="solid")
-                    cell.font = Font(name="Segoe UI", size=9, color=C_VERT_TXT)
-                elif "Moyen" in val_str:
-                    cell.fill = PatternFill(start_color=C_JAUNE_BG, end_color=C_JAUNE_BG, fill_type="solid")
-                    cell.font = Font(name="Segoe UI", size=9, color=C_JAUNE_TXT)
-                elif "Non conforme" in val_str:
-                    cell.fill = PatternFill(start_color=C_ROUGE_BG, end_color=C_ROUGE_BG, fill_type="solid")
-                    cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_ROUGE_TXT)
+    # Ligne TOTAL GÉNÉRAL
+    ws1.append(["TOTAL GÉNÉRAL", "-", total_pres_sum, total_demi_sum, total_abs_sum, total_paye_sum, "-", "-"])
+    ws1.row_dimensions[row_cur].height = 24
+    for c_i in range(1, len(headers_rh) + 1):
+        c = ws1.cell(row=row_cur, column=c_i)
+        c.font = Font(name="Calibri", size=10, bold=True, color="000000")
+        c.fill = PatternFill(start_color=BLEU_TOTAL, end_color=BLEU_TOTAL, fill_type="solid")
+        c.border = thin_border
+        if c_i in [3, 4, 5, 6, 7, 8]:
+            c.alignment = Alignment(horizontal="center", vertical="center")
+        else:
+            c.alignment = Alignment(horizontal="left", vertical="center")
 
-            # Col 10 : Score d'évaluation
-            elif col_idx == 10:
-                try:
-                    score_num = float(val_str)
-                    if score_num >= 80:
-                        cell.fill = PatternFill(start_color=C_SCORE_HAUT, end_color=C_SCORE_HAUT, fill_type="solid")
-                        cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_VERT_TXT)
-                    elif score_num >= 50:
-                        cell.fill = PatternFill(start_color=C_SCORE_MOY, end_color=C_SCORE_MOY, fill_type="solid")
-                        cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_JAUNE_TXT)
-                    else:
-                        cell.fill = PatternFill(start_color=C_ROUGE_BG, end_color=C_ROUGE_BG, fill_type="solid")
-                        cell.font = Font(name="Segoe UI", size=9, bold=True, color=C_ROUGE_TXT)
-                except ValueError:
-                    pass
-
-    # 5. Largeur adaptative des colonnes
-    for col in ws.columns:
-        if col[0].row < 6:
+    for col in ws1.columns:
+        if col[0].row < 3:
             continue
         max_len = max(len(str(c.value or '')) for c in col)
-        col_letter = get_column_letter(col[0].column)
-        ws.column_dimensions[col_letter].width = max(max_len + 4, 13)
+        ws1.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 14)
+
+    # -------------------------------------------------------------
+    # FEUILLE 2 : SYNTHÈSE PRODUCTION & MÉTRÉS DU MOIS
+    # -------------------------------------------------------------
+    ws2 = wb.create_sheet(title="Production & Métrés")
+    ws2.views.sheetView[0].showGridLines = True
+
+    ws2.merge_cells("A1:E1")
+    ws2["A1"] = f"TOTAL MÉTRÉS & PRODUCTION PAR TÂCHE — {mois_label.upper()}"
+    ws2["A1"].font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
+    ws2["A1"].fill = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
+    ws2["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws2.row_dimensions[1].height = 36
+
+    headers_prod = ["Chantier", "Corps d'état / Tâche", "Quantité Totale", "Unité", "Nombre Interventions"]
+    ws2.append([])
+    ws2.append(headers_prod)
+    ws2.row_dimensions[3].height = 26
+
+    for col_i in range(1, len(headers_prod) + 1):
+        cell = ws2.cell(row=3, column=col_i)
+        cell.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color=BLEU_HEADER, end_color=BLEU_HEADER, fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = thin_border
+
+    # Filtrer les tâches actives
+    df_travaux = df_mois[df_mois["Tâche"] != "-"].copy()
+    df_travaux["Quantite_Num"] = pd.to_numeric(df_travaux["Quantite"], errors='coerce').fillna(0)
+    
+    prod_group = df_travaux.groupby(["Chantier", "Tâche", "Unite"]).agg(
+        Total_Qte=("Quantite_Num", "sum"),
+        Nb_Fois=("ID", "count")
+    ).reset_index()
+
+    row_cur2 = 4
+    total_qte_m2 = 0.0
+
+    for _, r in prod_group.iterrows():
+        unite_lbl = r["Unite"]
+        qte_val = r["Total_Qte"] if unite_lbl != "Sans métrage" else "-"
+        if unite_lbl == "m²":
+            total_qte_m2 += r["Total_Qte"]
+
+        vals2 = [r["Chantier"], r["Tâche"], qte_val, unite_lbl, r["Nb_Fois"]]
+        ws2.append(vals2)
+        ws2.row_dimensions[row_cur2].height = 20
+
+        is_even = (row_cur2 % 2 == 0)
+        fill_c = PatternFill(start_color=GRIS_ZEBRA if is_even else "FFFFFF", end_color=GRIS_ZEBRA if is_even else "FFFFFF", fill_type="solid")
+
+        for c_i in range(1, len(headers_prod) + 1):
+            c = ws2.cell(row=row_cur2, column=c_i)
+            c.font = Font(name="Calibri", size=9)
+            c.border = thin_border
+            c.fill = fill_c
+            if c_i in [3, 4, 5]:
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            else:
+                c.alignment = Alignment(horizontal="left", vertical="center")
+        row_cur2 += 1
+
+    # Total m² en bas
+    ws2.append(["TOTAL GÉNÉRAL MÉTRÉS (m²)", "-", round(total_qte_m2, 1), "m²", len(df_travaux)])
+    ws2.row_dimensions[row_cur2].height = 24
+    for c_i in range(1, len(headers_prod) + 1):
+        c = ws2.cell(row=row_cur2, column=c_i)
+        c.font = Font(name="Calibri", size=10, bold=True, color="000000")
+        c.fill = PatternFill(start_color=BLEU_TOTAL, end_color=BLEU_TOTAL, fill_type="solid")
+        c.border = thin_border
+        if c_i in [3, 4, 5]:
+            c.alignment = Alignment(horizontal="center", vertical="center")
+
+    for col in ws2.columns:
+        if col[0].row < 3:
+            continue
+        max_len = max(len(str(c.value or '')) for c in col)
+        ws2.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 15)
+
+    # -------------------------------------------------------------
+    # FEUILLE 3 : DÉTAIL JOURNALIER (REGISTRE COMPLET)
+    # -------------------------------------------------------------
+    ws3 = wb.create_sheet(title="Détail Journalier")
+    ws3.views.sheetView[0].showGridLines = True
+
+    ws3.merge_cells("A1:J1")
+    ws3["A1"] = f"HISTORIQUE DÉTAILLÉ DES SAISIES — {mois_label.upper()}"
+    ws3["A1"].font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
+    ws3["A1"].fill = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
+    ws3["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws3.row_dimensions[1].height = 36
+
+    headers_det = ["Date", "Chantier", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Observation", "Score"]
+    ws3.append([])
+    ws3.append(headers_det)
+    ws3.row_dimensions[3].height = 26
+
+    for col_i in range(1, len(headers_det) + 1):
+        cell = ws3.cell(row=3, column=col_i)
+        cell.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color=BLEU_HEADER, end_color=BLEU_HEADER, fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = thin_border
+
+    row_cur3 = 4
+    for _, r in df_mois.iterrows():
+        prod_val = "Bricol" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
+        vals3 = [r["Date"], r["Chantier"], r["Conducteur"], r["Ouvrier"], r["Statut"], r["Tâche"], prod_val, r["Qualité"], r["Observation"], r["Score"]]
+        ws3.append(vals3)
+        ws3.row_dimensions[row_cur3].height = 20
+
+        is_even = (row_cur3 % 2 == 0)
+        fill_c = PatternFill(start_color=GRIS_ZEBRA if is_even else "FFFFFF", end_color=GRIS_ZEBRA if is_even else "FFFFFF", fill_type="solid")
+
+        for c_i in range(1, len(headers_det) + 1):
+            c = ws3.cell(row=row_cur3, column=c_i)
+            c.font = Font(name="Calibri", size=9)
+            c.border = thin_border
+            c.fill = fill_c
+            if c_i in [1, 5, 8, 10]:
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif c_i == 7:
+                c.alignment = Alignment(horizontal="right", vertical="center")
+            else:
+                c.alignment = Alignment(horizontal="left", vertical="center")
+        row_cur3 += 1
+
+    for col in ws3.columns:
+        if col[0].row < 3:
+            continue
+        max_len = max(len(str(c.value or '')) for c in col)
+        ws3.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 12)
 
     output = io.BytesIO()
     wb.save(output)
     return output.getvalue()
 
-def generer_rapport_html_colore(df_data):
-    """Génère une page Web imprimable prête pour PDF avec palette complète de couleurs si openpyxl n'est pas actif."""
-    html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-    <meta charset="utf-8">
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 20px; color: #222; }}
-        .header {{ background: #1B365D; color: white; padding: 18px; text-align: center; border-radius: 8px 8px 0 0; font-size: 18px; font-weight: bold; }}
-        .kpi-row {{ display: flex; gap: 10px; margin: 15px 0; }}
-        .kpi {{ flex: 1; padding: 12px; border-radius: 6px; text-align: center; border: 1px solid #E5E7EB; }}
-        .kpi-label {{ font-size: 11px; font-weight: bold; color: #6B7280; text-transform: uppercase; }}
-        .kpi-val {{ font-size: 22px; font-weight: bold; margin-top: 4px; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }}
-        th {{ background: #2C4D75; color: white; padding: 10px 8px; font-weight: 600; text-align: center; }}
-        td {{ padding: 8px; border-bottom: 1px solid #E5E7EB; }}
-        tr:nth-child(even) {{ background: #F9FAFB; }}
-        .badge {{ padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; display: inline-block; }}
-        .badge-vert {{ background: #E6F4EA; color: #137333; }}
-        .badge-jaune {{ background: #FEF7E0; color: #B06000; }}
-        .badge-rouge {{ background: #FCE8E6; color: #C5221F; }}
-    </style>
-    </head>
-    <body>
-        <div class="header">SUIVI QUOTIDIEN DE CHANTIER — RAPPORT OFFICIEL</div>
-        <div class="kpi-row">
-            <div class="kpi" style="background:#F0F4F8;"><div class="kpi-label">Total Entrées</div><div class="kpi-val" style="color:#1B365D;">{len(df_data)}</div></div>
-            <div class="kpi" style="background:#E6F4EA;"><div class="kpi-label">Présents</div><div class="kpi-val" style="color:#137333;">{sum(1 for v in df_data['Statut'] if 'Présent' in str(v))}</div></div>
-            <div class="kpi" style="background:#FEF7E0;"><div class="kpi-label">1/2 Journées</div><div class="kpi-val" style="color:#B06000;">{sum(1 for v in df_data['Statut'] if '1/2' in str(v))}</div></div>
-            <div class="kpi" style="background:#FCE8E6;"><div class="kpi-label">Absences</div><div class="kpi-val" style="color:#C5221F;">{sum(1 for v in df_data['Statut'] if 'Absence' in str(v))}</div></div>
-        </div>
-        <table>
-            <thead><tr>
-    """
-    for col in df_data.columns:
-        html += f"<th>{col}</th>"
-    html += "</tr></thead><tbody>"
-
-    for _, row in df_data.iterrows():
-        html += "<tr>"
-        for col_name, val in row.items():
-            val_str = str(val or "-")
-            if col_name == "Statut":
-                cls = "badge-vert" if "Présent" in val_str else ("badge-jaune" if "1/2" in val_str else "badge-rouge")
-                html += f'<td style="text-align:center;"><span class="badge {cls}">{val_str}</span></td>'
-            elif col_name == "Qualité":
-                cls = "badge-vert" if "Conforme" in val_str else ("badge-jaune" if "Moyen" in val_str else ("badge-rouge" if "Non" in val_str else ""))
-                html += f'<td style="text-align:center;"><span class="badge {cls}">{val_str}</span></td>'
-            elif col_name in ["Date", "Score"]:
-                html += f'<td style="text-align:center;"><b>{val_str}</b></td>'
-            elif col_name == "Production":
-                html += f'<td style="text-align:right;"><b>{val_str}</b></td>'
-            else:
-                html += f"<td>{val_str}</td>"
-        html += "</tr>"
-
-    html += "</tbody></table></body></html>"
-    return html.encode("utf-8")
 
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
@@ -599,7 +624,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st.rerun()
 
 # ==============================================================================
-# 1. ESPACES CONDUCTEURS
+# ESPACES CONDUCTEURS
 # ==============================================================================
 if menu_general == f"👷 Espace {nom_c1}":
     interface_saisie_conducteur("c1", nom_c1)
@@ -608,7 +633,7 @@ elif menu_general == f"👷 Espace {nom_c2}":
     interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# 2. ESPACE ADMIN (AVEC RAPPORT COLORÉ PROFESSIONNEL)
+# ESPACE ADMIN
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
     st.subheader("Accès Sécurisé - Administration")
@@ -647,7 +672,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             st.session_state["admin_active_module"] = None
 
         MODULES_ADMIN = [
-            ("mod_rapport", "📊 Registre & Rapports Colorés", "Consulter, corriger ou exporter les rapports Excel"),
+            ("mod_rapport", "📊 Registre & Bilan Mensuel", "Synthèse RH, métrés totaux et export Excel multi-feuilles"),
             ("mod_chantiers_taches", "🏗️ Chantiers & Corps d'état", "Ajouter, modifier ou supprimer des chantiers et tâches"),
             ("mod_profils", "👥 Profils & Photos", "Gérer les noms et photos des Conducteurs et Ouvriers"),
             ("mod_chantiers_cond", "👷 Chantiers / Conducteurs", "Attribuer les chantiers sous la responsabilité de chacun"),
@@ -695,10 +720,11 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             st.markdown("---")
 
-            # 1. MODULE REGISTRE ET EXPORT COLORÉ
+            # 1. MODULE BILAN MENSUEL & EXPORT MULTI-FEUILLES
             if mod_actuel == "mod_rapport":
-                st.markdown("### 📊 Registre Officiel & Rapports Colorés")
-                tab_reg, tab_corr = st.tabs(["📋 Rapport & Téléchargement", "✏️ Corriger une Saisie"])
+                st.markdown("### 📊 Registre Officiel & Synthèse Mensuelle")
+                
+                tab_mois, tab_corr = st.tabs(["📅 Bilan Mensuel & Export Excel", "✏️ Corriger une Saisie"])
 
                 conn = get_db_connection()
                 query_admin = """
@@ -719,107 +745,91 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     LEFT JOIN workers w ON p.worker_id = w.id
                     ORDER BY p.date_jour DESC, p.id DESC
                 """
-                df_all_pointages = pd.read_sql_query(query_admin, conn)
+                df_all = pd.read_sql_query(query_admin, conn)
                 conn.close()
 
-                with tab_reg:
-                    if df_all_pointages.empty:
-                        st.warning("⚠️️ Aucune saisie n'a encore été effectuée ou validée dans le registre.")
+                with tab_mois:
+                    if df_all.empty:
+                        st.warning("⚠️ Aucune donnée enregistrée dans le registre.")
                     else:
-                        c_f1, c_f2 = st.columns(2)
-                        with c_f1:
-                            conds_trouves = sorted(df_all_pointages["Conducteur"].dropna().unique().tolist())
-                            filtre_cond = st.selectbox("Filtrer par Conducteur :", ["Tous les conducteurs"] + conds_trouves)
-                        with c_f2:
-                            ch_trouves = sorted(df_all_pointages["Chantier"].dropna().unique().tolist())
-                            filtre_ch = st.selectbox("Filtrer par Chantier :", ["Tous les chantiers"] + ch_trouves)
+                        # Extraction des mois disponibles (format YYYY-MM)
+                        df_all["Mois_Annee"] = df_all["Date"].str.slice(0, 7)
+                        mois_disponibles = sorted(df_all["Mois_Annee"].unique().tolist(), reverse=True)
+                        
+                        col_m1, col_m2 = st.columns(2)
+                        with col_m1:
+                            mois_choisi = st.selectbox("📅 Sélectionner le Mois :", mois_disponibles)
+                        with col_m2:
+                            filtre_ch_m = st.selectbox("📍 Filtrer par Chantier :", ["Tous les chantiers"] + sorted(df_all["Chantier"].unique().tolist()))
 
-                        df_filtre = df_all_pointages.copy()
-                        if filtre_cond != "Tous les conducteurs":
-                            df_filtre = df_filtre[df_filtre["Conducteur"] == filtre_cond]
-                        if filtre_ch != "Tous les chantiers":
-                            df_filtre = df_filtre[df_filtre["Chantier"] == filtre_ch]
+                        # Filtrage du mois
+                        df_mois_actuel = df_all[df_all["Mois_Annee"] == mois_choisi].copy()
+                        if filtre_ch_m != "Tous les chantiers":
+                            df_mois_actuel = df_mois_actuel[df_mois_actuel["Chantier"] == filtre_ch_m]
 
-                        df_affichage = df_filtre.copy()
-                        df_affichage["Production"] = df_affichage.apply(
-                            lambda r: "Bricol" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-"),
-                            axis=1
-                        )
-                        colonnes_vues = ["Date", "Chantier", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Observation", "Score"]
-                        df_final_export = df_affichage[colonnes_vues]
+                        st.markdown(f"#### 📌 Synthèse de **{mois_choisi}** ({len(df_mois_actuel)} pointages enregistrés)")
 
-                        # Cartouche indicateurs dans l'application
-                        m1, m2, m3, m4 = st.columns(4)
-                        m1.metric("Total Ouvriers", len(df_final_export))
-                        m2.metric("Présents", sum(1 for v in df_final_export["Statut"] if "Présent" in str(v)))
-                        m3.metric("1/2 Journées", sum(1 for v in df_final_export["Statut"] if "1/2" in str(v)))
-                        m4.metric("Absences", sum(1 for v in df_final_export["Statut"] if "Absence" in str(v)))
+                        # Calculs des KPIs du mois
+                        total_ouv_actifs = df_mois_actuel["Ouvrier"].nunique()
+                        total_j_pres = sum(1 for v in df_mois_actuel["Statut"] if "Présent" in str(v))
+                        total_j_demi = sum(1 for v in df_mois_actuel["Statut"] if "1/2" in str(v))
+                        total_j_payes = total_j_pres + (total_j_demi * 0.5)
 
-                        st.dataframe(df_final_export, use_container_width=True, hide_index=True)
+                        # Somme des m²
+                        df_m2 = df_mois_actuel[(df_mois_actuel["Unite"] == "m²") & (df_mois_actuel["Quantite"] > 0)]
+                        total_m2_prod = df_m2["Quantite"].sum()
 
-                        st.markdown("#### 📥 Téléchargements Stylisés & Colorés")
-                        col_dl1, col_dl2 = st.columns(2)
+                        k1, k2, k3, k4 = st.columns(4)
+                        k1.metric("Ouvriers Actifs", f"{total_ouv_actifs}")
+                        k2.metric("Total Jours Payés", f"{total_j_payes} j")
+                        k3.metric("Absences Déclarées", f"{sum(1 for v in df_mois_actuel['Statut'] if 'Absence' in str(v))}")
+                        k4.metric("Production Étanchéité", f"{total_m2_prod:.1f} m²")
 
-                        # Option A : Excel avec couleurs conditionnelles
+                        st.markdown("---")
+                        st.markdown("#### 📥 Téléchargement du Bilan Mensuel")
+                        st.caption("Le classeur contient 3 feuilles distinctes : **1. Synthèse RH & Jours Payés**, **2. Métrés Totaux par Tâche**, **3. Détail Journalier**.")
+
                         if OPENPYXL_DISPO:
-                            excel_bytes = generer_fichier_excel_design_couleurs(df_final_export)
-                            with col_dl1:
-                                st.download_button(
-                                    "📗 Télécharger le Rapport Excel Stylisé (.xlsx)",
-                                    data=excel_bytes,
-                                    file_name=f"rapport_design_{date.today()}.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    use_container_width=True
-                                )
-                        else:
-                            with col_dl1:
-                                csv_propre = df_final_export.to_csv(index=False, sep=";", encoding="utf-8-sig")
-                                st.download_button(
-                                    "📥 Télécharger CSV (Excel Séparateur ;)",
-                                    data=csv_propre.encode("utf-8-sig"),
-                                    file_name=f"rapport_travaux_{date.today()}.csv",
-                                    mime="text/csv",
-                                    use_container_width=True
-                                )
-
-                        # Option B : Page Web / PDF Imprimable
-                        html_bytes = generer_rapport_html_colore(df_final_export)
-                        with col_dl2:
+                            excel_mensuel = generer_classeur_mensuel_complet(df_mois_actuel, f"Mois {mois_choisi}")
                             st.download_button(
-                                "📄 Télécharger Rapport HTML (Couleurs & Prêt à Imprimer)",
-                                data=html_bytes,
-                                file_name=f"rapport_visuel_{date.today()}.html",
-                                mime="text/html",
+                                f"📗 Télécharger le Bilan Complet de {mois_choisi} (.xlsx)",
+                                data=excel_mensuel,
+                                file_name=f"bilan_mensuel_chantier_{mois_choisi}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+                        else:
+                            csv_propre = df_mois_actuel.to_csv(index=False, sep=";", encoding="utf-8-sig")
+                            st.download_button(
+                                f"📥 Télécharger l'export CSV de {mois_choisi}",
+                                data=csv_propre.encode("utf-8-sig"),
+                                file_name=f"bilan_{mois_choisi}.csv",
+                                mime="text/csv",
                                 use_container_width=True
                             )
 
+                        st.markdown("##### Aperçu des Lignes du Mois :")
+                        df_apercu = df_mois_actuel[["Date", "Chantier", "Conducteur", "Ouvrier", "Statut", "Tâche", "Quantite", "Unite", "Qualité", "Score"]].copy()
+                        st.dataframe(df_apercu, use_container_width=True, hide_index=True)
+
                 with tab_corr:
                     st.markdown("##### Rectifier ou supprimer une saisie erronée")
-                    if df_all_pointages.empty:
+                    if df_all.empty:
                         st.info("Aucun pointage à corriger pour le moment.")
                     else:
-                        df_all_pointages["label"] = df_all_pointages.apply(
+                        df_all["label"] = df_all.apply(
                             lambda r: f"ID #{r['ID']} | {r['Date']} | {r['Chantier']} | {r['Ouvrier']} ({r['Conducteur']})",
                             axis=1
                         )
-                        ligne_choisie = st.selectbox(
-                            "Sélectionner l'enregistrement à corriger :",
-                            df_all_pointages["label"].tolist(),
-                            key="sel_pt_correction"
-                        )
-                        row_sel = df_all_pointages[df_all_pointages["label"] == ligne_choisie].iloc[0]
+                        ligne_choisie = st.selectbox("Sélectionner l'enregistrement à corriger :", df_all["label"].tolist(), key="sel_pt_correction")
+                        row_sel = df_all[df_all["label"] == ligne_choisie].iloc[0]
                         pt_id = int(row_sel["ID"])
 
                         st.info(f"Pointage de **{row_sel['Ouvrier']}** sur **{row_sel['Chantier']}** le **{row_sel['Date']}**")
 
                         col_c1, col_c2 = st.columns(2)
                         with col_c1:
-                            statuts_possibles = [
-                                "Présent (Journée)",
-                                "1/2 journée",
-                                "Absence Autorisée (Congé/Maladie)",
-                                "Absence Non Autorisée (Injustifiée)"
-                            ]
+                            statuts_possibles = ["Présent (Journée)", "1/2 journée", "Absence Autorisée (Congé/Maladie)", "Absence Non Autorisée (Injustifiée)"]
                             idx_st = statuts_possibles.index(row_sel["Statut"]) if row_sel["Statut"] in statuts_possibles else 0
                             mod_statut = st.selectbox("Statut :", statuts_possibles, index=idx_st, key=f"mod_st_{pt_id}")
                             
@@ -1093,7 +1103,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             chantiers_options = get_all_chantiers()
                             chantier_init = st.selectbox("Chantier initial :", chantiers_options, key="sel_new_worker_ch_tab")
                         with col_add2:
-                            photo_nouvel_ouvrier = st.file_uploader("Photo (Optionnel) :", type=["jpg", "jpeg", "png"], key=upload_new_worker_photo_tab)
+                            photo_nouvel_ouvrier = st.file_uploader("Photo (Optionnel) :", type=["jpg", "jpeg", "png"], key="upload_new_worker_photo_tab")
 
                         if st.button("➕ Ajouter l'ouvrier", type="primary", key="btn_add_worker_tab"):
                             nom_nettoye = nom_nouveau.strip()
@@ -1133,7 +1143,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 if os.path.exists(p_to_del):
                                     os.remove(p_to_del)
 
-                            st.session_state["sync_notif"] = f"🗑️️ {ouvrier_a_del} supprimé de la base."
+                            st.session_state["sync_notif"] = f"🗑️ {ouvrier_a_del} supprimé de la base."
                             st.rerun()
 
             elif mod_actuel == "mod_chantiers_cond":
