@@ -221,6 +221,11 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     GRIS_TOTAL = "E2E8F0"
     BORDER_COLOR = "CBD5E1"
     
+    # Couleurs du thème de l'application
+    VERT_BG, VERT_TXT = "DCFCE7", "166534"
+    JAUNE_BG, JAUNE_TXT = "FEF9C3", "854D0E"
+    ROUGE_BG, ROUGE_TXT = "FEE2E2", "991B1B"
+    
     font_titre = Font(name="Segoe UI", size=13, bold=True, color="FFFFFF")
     font_header = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
     font_body = Font(name="Segoe UI", size=9)
@@ -307,17 +312,17 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         ws_sum.column_dimensions[col_lettre].width = larg
 
     # 2. FEUILLES INDIVIDUELLES PAR CHANTIER
-    headers_detail = ["Date", "Conducteur", "Ouvrier", "Statut", "Corps d'état / Tâche", "Production", "Contrôle Qualité", "Observation", "Score"]
+    headers_detail = ["Date", "Conducteur", "Ouvrier", "Statut", "Corps d'état / Tâche", "Production", "Contrôle Qualité", "Observation / Rendement", "Score"]
     
     largeurs_detail = {
         "A": 14,
         "B": 18,
         "C": 26,
-        "D": 22,
+        "D": 20,
         "E": 28,
         "F": 16,
-        "G": 22,
-        "H": 36,
+        "G": 24,
+        "H": 38,
         "I": 12,
     }
 
@@ -364,28 +369,71 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         r_idx = 5
         for _, r in grp.iterrows():
             prod_aff = "Bricolage" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
+            
+            # Nettoyage de '(Journée)' et des symboles
+            statut_aff = str(r["Statut"]).replace("(Journée)", "").replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
             qual_clean = str(r["Qualité"]).replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
             obs_clean = str(r["Observation"]).replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
             
             vals = [
-                r["Date"], r["Conducteur"], r["Ouvrier"], r["Statut"],
+                r["Date"], r["Conducteur"], r["Ouvrier"], statut_aff,
                 r["Tâche"], prod_aff, qual_clean, obs_clean, r["Score"]
             ]
             ws_ch.append(vals)
             ws_ch.row_dimensions[r_idx].height = 22
             
-            c_fill = fill_zebra if r_idx % 2 == 0 else fill_white
+            c_fill_defaut = fill_zebra if r_idx % 2 == 0 else fill_white
             for col_idx in range(1, len(headers_detail) + 1):
                 c = ws_ch.cell(row=r_idx, column=col_idx)
                 c.font = font_body
                 c.border = cell_border
-                c.fill = c_fill
+                c.fill = c_fill_defaut
+                
+                # Alignements
                 if col_idx in [1, 4, 7, 9]:
                     c.alignment = Alignment(horizontal="center", vertical="center")
                 elif col_idx == 6:
                     c.alignment = Alignment(horizontal="right", vertical="center")
                 else:
                     c.alignment = Alignment(horizontal="left", vertical="center")
+                
+                # COLORATION SELON LE THÈME DE L'APPLICATION
+                # 1. Statut (Colonne 4)
+                if col_idx == 4:
+                    if "Présent" in statut_aff:
+                        c.fill = PatternFill(start_color=VERT_BG, end_color=VERT_BG, fill_type="solid")
+                        c.font = Font(name="Segoe UI", size=9, bold=True, color=VERT_TXT)
+                    elif "1/2" in statut_aff:
+                        c.fill = PatternFill(start_color=JAUNE_BG, end_color=JAUNE_BG, fill_type="solid")
+                        c.font = Font(name="Segoe UI", size=9, bold=True, color=JAUNE_TXT)
+                    elif "Absence" in statut_aff:
+                        c.fill = PatternFill(start_color=ROUGE_BG, end_color=ROUGE_BG, fill_type="solid")
+                        c.font = Font(name="Segoe UI", size=9, bold=True, color=ROUGE_TXT)
+                        
+                # 2. Contrôle Qualité (Colonne 7)
+                elif col_idx == 7:
+                    if "Conforme" in qual_clean:
+                        c.fill = PatternFill(start_color=VERT_BG, end_color=VERT_BG, fill_type="solid")
+                        c.font = Font(name="Segoe UI", size=9, bold=True, color=VERT_TXT)
+                    elif "Acceptable" in qual_clean:
+                        c.fill = PatternFill(start_color=JAUNE_BG, end_color=JAUNE_BG, fill_type="solid")
+                        c.font = Font(name="Segoe UI", size=9, bold=True, color=JAUNE_TXT)
+                    elif "Non conforme" in qual_clean or "reprendre" in qual_clean:
+                        c.fill = PatternFill(start_color=ROUGE_BG, end_color=ROUGE_BG, fill_type="solid")
+                        c.font = Font(name="Segoe UI", size=9, bold=True, color=ROUGE_TXT)
+                        
+                # 3. Observation / Rendement (Colonne 8)
+                elif col_idx == 8:
+                    if "bon rendement" in obs_clean or "Excellent" in obs_clean or "Bon travail" in obs_clean:
+                        c.fill = PatternFill(start_color=VERT_BG, end_color=VERT_BG, fill_type="solid")
+                        c.font = Font(name="Segoe UI", size=9, color=VERT_TXT)
+                    elif "Rendement moyen" in obs_clean or "Moyen" in obs_clean:
+                        c.fill = PatternFill(start_color=JAUNE_BG, end_color=JAUNE_BG, fill_type="solid")
+                        c.font = Font(name="Segoe UI", size=9, color=JAUNE_TXT)
+                    elif "Faible rendement" in obs_clean or "surveiller" in obs_clean:
+                        c.fill = PatternFill(start_color=ROUGE_BG, end_color=ROUGE_BG, fill_type="solid")
+                        c.font = Font(name="Segoe UI", size=9, color=ROUGE_TXT)
+                        
             r_idx += 1
             
         for col_lettre, larg in largeurs_detail.items():
@@ -494,7 +542,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             statut_val = st.selectbox(
                 "Statut de présence :",
                 [
-                    "Présent (Journée)",
+                    "Présent",
                     "1/2 journée",
                     "Absence Autorisée (Congé/Maladie)",
                     "Absence Non Autorisée (Injustifiée)"
@@ -533,7 +581,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
         for _, row in equipe_active.iterrows():
             w_id = row['id']
             w_nom = row['nom']
-            infos_p = presence_enregistree.get(w_id, {"statut": "Présent (Journée)", "motif_absence": ""})
+            infos_p = presence_enregistree.get(w_id, {"statut": "Présent", "motif_absence": ""})
             st_val = infos_p["statut"]
 
             if "Présent" in st_val or "1/2" in st_val:
@@ -845,7 +893,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                     st.info(f"**{row_sel['Ouvrier']}** — {row_sel['Chantier']} ({row_sel['Date']})")
 
-                    statuts_possibles = ["Présent (Journée)", "1/2 journée", "Absence Autorisée (Congé/Maladie)", "Absence Non Autorisée (Injustifiée)"]
+                    statuts_possibles = ["Présent", "1/2 journée", "Absence Autorisée (Congé/Maladie)", "Absence Non Autorisée (Injustifiée)"]
                     idx_st = statuts_possibles.index(row_sel["Statut"]) if row_sel["Statut"] in statuts_possibles else 0
                     mod_statut = st.selectbox("Statut :", statuts_possibles, index=idx_st, key=f"mod_st_{pt_id}")
                     
