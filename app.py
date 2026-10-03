@@ -235,7 +235,7 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     thin_side = Side(style='thin', color=BORDER_COLOR)
     cell_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
     
-    # 1. FEUILLE SYNTHESE GLOBALE
+    # 1. FEUILLE SYNTHÈSE GÉNÉRALE
     ws_sum = wb.active
     ws_sum.title = "Synthèse Générale"
     ws_sum.views.sheetView[0].showGridLines = True
@@ -250,7 +250,7 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     headers_sum = ["Chantier", "Effectif Actif", "Jours Validés", "Production (m²)", "Total Lignes", "Dernier Pointage", "Conducteur"]
     ws_sum.append([])
     ws_sum.append(headers_sum)
-    ws_sum.row_dimensions[3].height = 26
+    ws_sum.row_dimensions[3].height = 28
     
     for col_idx in range(1, len(headers_sum) + 1):
         c = ws_sum.cell(row=3, column=col_idx)
@@ -301,16 +301,26 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         c.border = cell_border
         if col_idx in [2, 3, 4, 5]:
             c.alignment = Alignment(horizontal="center", vertical="center")
-            
-    for col in ws_sum.columns:
-        if col[0].row < 3:
-            continue
-        max_l = max(len(str(c.value or '')) for c in col)
-        ws_sum.column_dimensions[get_column_letter(col[0].column)].width = max(max_l + 4, 15)
 
-    # 2. FEUILLES SEPAREES PAR CHANTIER
+    largeurs_sum = {"A": 24, "B": 16, "C": 16, "D": 18, "E": 15, "F": 18, "G": 20}
+    for col_lettre, larg in largeurs_sum.items():
+        ws_sum.column_dimensions[col_lettre].width = larg
+
+    # 2. FEUILLES INDIVIDUELLES PAR CHANTIER
     headers_detail = ["Date", "Conducteur", "Ouvrier", "Statut", "Corps d'état / Tâche", "Production", "Contrôle Qualité", "Observation", "Score"]
     
+    largeurs_detail = {
+        "A": 14,
+        "B": 18,
+        "C": 26,
+        "D": 22,
+        "E": 28,
+        "F": 16,
+        "G": 22,
+        "H": 36,
+        "I": 12,
+    }
+
     for ch_name, grp in df_data.groupby("Chantier"):
         safe_title = ch_name.replace("/", "-").replace("\\", "-")[:28]
         ws_ch = wb.create_sheet(title=safe_title)
@@ -321,7 +331,7 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         ws_ch["A1"].font = font_titre
         ws_ch["A1"].fill = fill_titre
         ws_ch["A1"].alignment = Alignment(horizontal="center", vertical="center")
-        ws_ch.row_dimensions[1].height = 36
+        ws_ch.row_dimensions[1].height = 38
         
         ouv_c = grp["Ouvrier"].nunique()
         p_c = sum(1 for v in grp["Statut"] if "Présent" in str(v))
@@ -332,16 +342,17 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         ws_ch.merge_cells("A2:D2")
         ws_ch["A2"] = f"Effectif : {ouv_c} ouvrier(s) | Jours Payés : {j_c} j"
         ws_ch["A2"].font = Font(name="Segoe UI", size=10, bold=True, color="1E3A8A")
+        ws_ch["A2"].alignment = Alignment(horizontal="left", vertical="center")
         
         ws_ch.merge_cells("E2:I2")
         ws_ch["E2"] = f"Production Métrée : {round(m2_c, 1)} m² | Total Saisies : {len(grp)}"
         ws_ch["E2"].font = Font(name="Segoe UI", size=10, bold=True, color="475569")
-        ws_ch["E2"].alignment = Alignment(horizontal="right")
-        ws_ch.row_dimensions[2].height = 22
+        ws_ch["E2"].alignment = Alignment(horizontal="right", vertical="center")
+        ws_ch.row_dimensions[2].height = 24
         
         ws_ch.append([])
         ws_ch.append(headers_detail)
-        ws_ch.row_dimensions[4].height = 25
+        ws_ch.row_dimensions[4].height = 28
         
         for col_idx in range(1, len(headers_detail) + 1):
             c = ws_ch.cell(row=4, column=col_idx)
@@ -354,13 +365,14 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         for _, r in grp.iterrows():
             prod_aff = "Bricolage" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
             qual_clean = str(r["Qualité"]).replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
+            obs_clean = str(r["Observation"]).replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
             
             vals = [
                 r["Date"], r["Conducteur"], r["Ouvrier"], r["Statut"],
-                r["Tâche"], prod_aff, qual_clean, r["Observation"], r["Score"]
+                r["Tâche"], prod_aff, qual_clean, obs_clean, r["Score"]
             ]
             ws_ch.append(vals)
-            ws_ch.row_dimensions[r_idx].height = 20
+            ws_ch.row_dimensions[r_idx].height = 22
             
             c_fill = fill_zebra if r_idx % 2 == 0 else fill_white
             for col_idx in range(1, len(headers_detail) + 1):
@@ -376,11 +388,8 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
                     c.alignment = Alignment(horizontal="left", vertical="center")
             r_idx += 1
             
-        for col in ws_ch.columns:
-            if col[0].row < 4:
-                continue
-            max_l = max(len(str(c.value or '')) for c in col)
-            ws_ch.column_dimensions[get_column_letter(col[0].column)].width = max(max_l + 4, 14)
+        for col_lettre, larg in largeurs_detail.items():
+            ws_ch.column_dimensions[col_lettre].width = larg
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -511,7 +520,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 
     elif st.session_state[step_key] == 2:
         st.markdown("### 🔨 Étape 2 : Production & Appréciation")
-        st.caption("Saisie uniquement pour les présents. Les absences sont validées automatiquement.")
+        st.caption("Saisie uniquement pour les présents. Les absences sont validées directement.")
 
         if st.button("⬅️ Retour au Pointage (Étape 1)", use_container_width=True):
             st.session_state[step_key] = 1
@@ -791,7 +800,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.markdown("#### 📥 Téléchargements")
                     excel_pro_bytes = generer_classeur_pro_excel(df_mois_actuel, mois_choisi)
                     st.download_button(
-                        label="📗 Télécharger le Rapport Excel (.xlsx) Formate & Organisé",
+                        label="📗 Télécharger le Rapport Excel (.xlsx) Formaté & Organisé",
                         data=excel_pro_bytes,
                         file_name=f"rapport_chantiers_{mois_choisi}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1009,7 +1018,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                 with tab_ouv:
                     df_w_m = get_workers_df()
-                    sub_ed, sub_ad, sub_dl = st.tabs(["✏️ Modifier", "➕ Ajouter", "🗑️ Supprimer"])
+                    sub_ed, sub_ad, sub_dl = st.tabs(["✏ Modifier", "➕ Ajouter", "🗑️ Supprimer"])
                     with sub_ed:
                         o_sel = st.selectbox("Sélectionner l'ouvrier :", df_w_m["nom"].tolist(), key="sel_ouv_cfg")
                         ph_o = get_photo_path(o_sel)
