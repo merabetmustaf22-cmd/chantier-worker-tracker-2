@@ -216,21 +216,23 @@ def get_photo_path(identifiant):
     return None
 
 # ==============================================================================
-# GÉNÉRATEUR EXCEL MENSUEL MULTI-FEUILLES (AVEC TOTAUX AUTOMATIQUES)
+# GÉNÉRATEUR EXCEL : AVEC FEUILLES SÉPARÉES PAR CHANTIER
 # ==============================================================================
-def generer_classeur_mensuel_complet(df_mois, mois_label):
+def generer_classeur_par_chantier_separe(df_mois, mois_label):
+    """Génère un classeur Excel avec un onglet dédié pour CHAQUE chantier + une feuille récap globale."""
     if not OPENPYXL_DISPO:
         return None
 
     wb = openpyxl.Workbook()
-    
-    # Couleurs du thème
+    # Supprimer la feuille par défaut après
+    ws_initial = wb.active
+
     BLEU_TITRE = "0F2537"
     BLEU_HEADER = "1E3A5F"
     BLEU_TOTAL = "E2E8F0"
     GRIS_ZEBRA = "F8FAFC"
     BORDURE_COLOR = "CBD5E1"
-    
+
     thin_border = Border(
         left=Side(style='thin', color=BORDURE_COLOR),
         right=Side(style='thin', color=BORDURE_COLOR),
@@ -238,235 +240,165 @@ def generer_classeur_mensuel_complet(df_mois, mois_label):
         bottom=Side(style='thin', color=BORDURE_COLOR)
     )
 
-    # -------------------------------------------------------------
-    # FEUILLE 1 : SYNTHÈSE MENSUELLE OUVRIERS (PAIE & RH)
-    # -------------------------------------------------------------
-    ws1 = wb.active
-    ws1.title = "Synthèse Mensuelle RH"
-    ws1.views.sheetView[0].showGridLines = True
+    # 1. FEUILLE SOMMAIRE GLOBAL
+    ws_sum = ws_initial
+    ws_sum.title = "Synthèse Générale"
+    ws_sum.views.sheetView[0].showGridLines = True
 
-    ws1.merge_cells("A1:H1")
-    ws1["A1"] = f"BILAN MENSUEL DES POINTAGES & EFFECTIFS — {mois_label.upper()}"
-    ws1["A1"].font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
-    ws1["A1"].fill = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
-    ws1["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    ws1.row_dimensions[1].height = 36
+    ws_sum.merge_cells("A1:F1")
+    ws_sum["A1"] = f"RÉCAPITULATIF DE TOUS LES CHANTIERS — {mois_label.upper()}"
+    ws_sum["A1"].font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
+    ws_sum["A1"].fill = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
+    ws_sum["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws_sum.row_dimensions[1].height = 36
 
-    headers_rh = [
-        "Nom Ouvrier", "Dernier Chantier", "Jours Présents (1.0)", "1/2 Journées (0.5)", 
-        "Absences", "Total Jours Payés", "Taux Présence", "Score Moyen"
-    ]
-    ws1.append([])
-    ws1.append(headers_rh)
-    ws1.row_dimensions[3].height = 26
+    headers_sum = ["Chantier", "Ouvriers Déployés", "Total Jours Payés", "Production Étanchéité (m²)", "Total Lignes Saisies", "Dernier Conducteur"]
+    ws_sum.append([])
+    ws_sum.append(headers_sum)
+    ws_sum.row_dimensions[3].height = 26
 
-    for col_i in range(1, len(headers_rh) + 1):
-        cell = ws1.cell(row=3, column=col_i)
-        cell.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
-        cell.fill = PatternFill(start_color=BLEU_HEADER, end_color=BLEU_HEADER, fill_type="solid")
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = thin_border
+    for c_i in range(1, len(headers_sum) + 1):
+        c = ws_sum.cell(row=3, column=c_i)
+        c.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        c.fill = PatternFill(start_color=BLEU_HEADER, end_color=BLEU_HEADER, fill_type="solid")
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.border = thin_border
 
-    # Calcul des totaux par ouvrier
-    ouvriers_group = df_mois.groupby("Ouvrier")
-    row_cur = 4
-    total_pres_sum = 0
-    total_demi_sum = 0
-    total_abs_sum = 0
-    total_paye_sum = 0.0
+    chantiers_group = df_mois.groupby("Chantier")
+    row_sum_idx = 4
+    tot_glob_ouv = 0
+    tot_glob_j = 0.0
+    tot_glob_m2 = 0.0
 
-    for nom_ouv, grp in ouvriers_group:
-        p_count = sum(1 for v in grp["Statut"] if "Présent" in str(v))
-        d_count = sum(1 for v in grp["Statut"] if "1/2" in str(v))
-        a_count = sum(1 for v in grp["Statut"] if "Absence" in str(v))
-        j_payes = p_count + (d_count * 0.5)
+    for ch_nom, ch_df in chantiers_group:
+        nb_ouv = ch_df["Ouvrier"].nunique()
+        p_cnt = sum(1 for v in ch_df["Statut"] if "Présent" in str(v))
+        d_cnt = sum(1 for v in ch_df["Statut"] if "1/2" in str(v))
+        j_payes_ch = p_cnt + (d_cnt * 0.5)
         
-        total_presents_possible = p_count + d_count + a_count
-        taux_pres = f"{(j_payes / total_presents_possible * 100):.1f}%" if total_presents_possible > 0 else "0%"
-        
-        scores_valides = pd.to_numeric(grp["Score"], errors='coerce').dropna()
-        score_moy = f"{scores_valides.mean():.1f}" if not scores_valides.empty else "-"
-        dernier_ch = grp["Chantier"].iloc[-1] if not grp.empty else "-"
+        m2_ch = ch_df[(ch_df["Unite"] == "m²") & (ch_df["Quantite"] > 0)]["Quantite"].sum()
+        cond_dernier = ch_df["Conducteur"].iloc[-1] if not ch_df.empty else "-"
 
-        vals = [nom_ouv, dernier_ch, p_count, d_count, a_count, j_payes, taux_pres, score_moy]
-        ws1.append(vals)
-        ws1.row_dimensions[row_cur].height = 20
+        vals_sum = [ch_nom, nb_ouv, j_payes_ch, round(m2_ch, 1), len(ch_df), cond_dernier]
+        ws_sum.append(vals_sum)
+        ws_sum.row_dimensions[row_sum_idx].height = 20
 
-        is_even = (row_cur % 2 == 0)
+        is_even = (row_sum_idx % 2 == 0)
         fill_c = PatternFill(start_color=GRIS_ZEBRA if is_even else "FFFFFF", end_color=GRIS_ZEBRA if is_even else "FFFFFF", fill_type="solid")
 
-        for c_i in range(1, len(headers_rh) + 1):
-            c = ws1.cell(row=row_cur, column=c_i)
+        for c_i in range(1, len(headers_sum) + 1):
+            c = ws_sum.cell(row=row_sum_idx, column=c_i)
             c.font = Font(name="Calibri", size=9)
             c.border = thin_border
             c.fill = fill_c
-            if c_i in [3, 4, 5, 6, 7, 8]:
+            if c_i in [2, 3, 4, 5]:
                 c.alignment = Alignment(horizontal="center", vertical="center")
             else:
                 c.alignment = Alignment(horizontal="left", vertical="center")
 
-        total_pres_sum += p_count
-        total_demi_sum += d_count
-        total_abs_sum += a_count
-        total_paye_sum += j_payes
-        row_cur += 1
+        tot_glob_ouv += nb_ouv
+        tot_glob_j += j_payes_ch
+        tot_glob_m2 += m2_ch
+        row_sum_idx += 1
 
-    # Ligne TOTAL GÉNÉRAL
-    ws1.append(["TOTAL GÉNÉRAL", "-", total_pres_sum, total_demi_sum, total_abs_sum, total_paye_sum, "-", "-"])
-    ws1.row_dimensions[row_cur].height = 24
-    for c_i in range(1, len(headers_rh) + 1):
-        c = ws1.cell(row=row_cur, column=c_i)
+    # Ligne total globale
+    ws_sum.append(["TOTAL GÉNÉRAL", tot_glob_ouv, tot_glob_j, round(tot_glob_m2, 1), len(df_mois), "-"])
+    ws_sum.row_dimensions[row_sum_idx].height = 24
+    for c_i in range(1, len(headers_sum) + 1):
+        c = ws_sum.cell(row=row_sum_idx, column=c_i)
         c.font = Font(name="Calibri", size=10, bold=True, color="000000")
         c.fill = PatternFill(start_color=BLEU_TOTAL, end_color=BLEU_TOTAL, fill_type="solid")
         c.border = thin_border
-        if c_i in [3, 4, 5, 6, 7, 8]:
-            c.alignment = Alignment(horizontal="center", vertical="center")
-        else:
-            c.alignment = Alignment(horizontal="left", vertical="center")
-
-    for col in ws1.columns:
-        if col[0].row < 3:
-            continue
-        max_len = max(len(str(c.value or '')) for c in col)
-        ws1.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 14)
-
-    # -------------------------------------------------------------
-    # FEUILLE 2 : SYNTHÈSE PRODUCTION & MÉTRÉS DU MOIS
-    # -------------------------------------------------------------
-    ws2 = wb.create_sheet(title="Production & Métrés")
-    ws2.views.sheetView[0].showGridLines = True
-
-    ws2.merge_cells("A1:E1")
-    ws2["A1"] = f"TOTAL MÉTRÉS & PRODUCTION PAR TÂCHE — {mois_label.upper()}"
-    ws2["A1"].font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
-    ws2["A1"].fill = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
-    ws2["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    ws2.row_dimensions[1].height = 36
-
-    headers_prod = ["Chantier", "Corps d'état / Tâche", "Quantité Totale", "Unité", "Nombre Interventions"]
-    ws2.append([])
-    ws2.append(headers_prod)
-    ws2.row_dimensions[3].height = 26
-
-    for col_i in range(1, len(headers_prod) + 1):
-        cell = ws2.cell(row=3, column=col_i)
-        cell.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
-        cell.fill = PatternFill(start_color=BLEU_HEADER, end_color=BLEU_HEADER, fill_type="solid")
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = thin_border
-
-    # Filtrer les tâches actives
-    df_travaux = df_mois[df_mois["Tâche"] != "-"].copy()
-    df_travaux["Quantite_Num"] = pd.to_numeric(df_travaux["Quantite"], errors='coerce').fillna(0)
-    
-    prod_group = df_travaux.groupby(["Chantier", "Tâche", "Unite"]).agg(
-        Total_Qte=("Quantite_Num", "sum"),
-        Nb_Fois=("ID", "count")
-    ).reset_index()
-
-    row_cur2 = 4
-    total_qte_m2 = 0.0
-
-    for _, r in prod_group.iterrows():
-        unite_lbl = r["Unite"]
-        qte_val = r["Total_Qte"] if unite_lbl != "Sans métrage" else "-"
-        if unite_lbl == "m²":
-            total_qte_m2 += r["Total_Qte"]
-
-        vals2 = [r["Chantier"], r["Tâche"], qte_val, unite_lbl, r["Nb_Fois"]]
-        ws2.append(vals2)
-        ws2.row_dimensions[row_cur2].height = 20
-
-        is_even = (row_cur2 % 2 == 0)
-        fill_c = PatternFill(start_color=GRIS_ZEBRA if is_even else "FFFFFF", end_color=GRIS_ZEBRA if is_even else "FFFFFF", fill_type="solid")
-
-        for c_i in range(1, len(headers_prod) + 1):
-            c = ws2.cell(row=row_cur2, column=c_i)
-            c.font = Font(name="Calibri", size=9)
-            c.border = thin_border
-            c.fill = fill_c
-            if c_i in [3, 4, 5]:
-                c.alignment = Alignment(horizontal="center", vertical="center")
-            else:
-                c.alignment = Alignment(horizontal="left", vertical="center")
-        row_cur2 += 1
-
-    # Total m² en bas
-    ws2.append(["TOTAL GÉNÉRAL MÉTRÉS (m²)", "-", round(total_qte_m2, 1), "m²", len(df_travaux)])
-    ws2.row_dimensions[row_cur2].height = 24
-    for c_i in range(1, len(headers_prod) + 1):
-        c = ws2.cell(row=row_cur2, column=c_i)
-        c.font = Font(name="Calibri", size=10, bold=True, color="000000")
-        c.fill = PatternFill(start_color=BLEU_TOTAL, end_color=BLEU_TOTAL, fill_type="solid")
-        c.border = thin_border
-        if c_i in [3, 4, 5]:
+        if c_i in [2, 3, 4, 5]:
             c.alignment = Alignment(horizontal="center", vertical="center")
 
-    for col in ws2.columns:
+    for col in ws_sum.columns:
         if col[0].row < 3:
             continue
         max_len = max(len(str(c.value or '')) for c in col)
-        ws2.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 15)
+        ws_sum.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 15)
 
-    # -------------------------------------------------------------
-    # FEUILLE 3 : DÉTAIL JOURNALIER (REGISTRE COMPLET)
-    # -------------------------------------------------------------
-    ws3 = wb.create_sheet(title="Détail Journalier")
-    ws3.views.sheetView[0].showGridLines = True
+    # 2. CRÉATION D'UNE FEUILLE INDIVIDUELLE POUR CHAQUE CHANTIER
+    for ch_nom, ch_df in chantiers_group:
+        # Nom de l'onglet sécurisé (max 31 caractères sans caractères interdits)
+        safe_title = ch_nom.replace("/", "-").replace("\\", "-").replace("?", "").replace("*", "")[:28]
+        ws_ch = wb.create_sheet(title=safe_title)
+        ws_ch.views.sheetView[0].showGridLines = True
 
-    ws3.merge_cells("A1:J1")
-    ws3["A1"] = f"HISTORIQUE DÉTAILLÉ DES SAISIES — {mois_label.upper()}"
-    ws3["A1"].font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
-    ws3["A1"].fill = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
-    ws3["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    ws3.row_dimensions[1].height = 36
+        # En-tête officiel du chantier
+        ws_ch.merge_cells("A1:I1")
+        ws_ch["A1"] = f"CHANTIER : {ch_nom.upper()} — BILAN MENSUEL ({mois_label.upper()})"
+        ws_ch["A1"].font = Font(name="Calibri", size=12, bold=True, color="FFFFFF")
+        ws_ch["A1"].fill = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
+        ws_ch["A1"].alignment = Alignment(horizontal="center", vertical="center")
+        ws_ch.row_dimensions[1].height = 36
 
-    headers_det = ["Date", "Chantier", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Observation", "Score"]
-    ws3.append([])
-    ws3.append(headers_det)
-    ws3.row_dimensions[3].height = 26
+        # Indicateurs du chantier
+        ch_ouvriers_cnt = ch_df["Ouvrier"].nunique()
+        ch_p_cnt = sum(1 for v in ch_df["Statut"] if "Présent" in str(v))
+        ch_d_cnt = sum(1 for v in ch_df["Statut"] if "1/2" in str(v))
+        ch_j_payes = ch_p_cnt + (ch_d_cnt * 0.5)
+        ch_m2 = ch_df[(ch_df["Unite"] == "m²") & (ch_df["Quantite"] > 0)]["Quantite"].sum()
 
-    for col_i in range(1, len(headers_det) + 1):
-        cell = ws3.cell(row=3, column=col_i)
-        cell.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
-        cell.fill = PatternFill(start_color=BLEU_HEADER, end_color=BLEU_HEADER, fill_type="solid")
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = thin_border
+        ws_ch.merge_cells("A2:C2")
+        ws_ch["A2"] = f"Effectif actif : {ch_ouvriers_cnt} ouvriers | Total Jours Payés : {ch_j_payes} j"
+        ws_ch["A2"].font = Font(name="Calibri", size=9, bold=True, color="1E3A5F")
 
-    row_cur3 = 4
-    for _, r in df_mois.iterrows():
-        prod_val = "Bricol" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
-        vals3 = [r["Date"], r["Chantier"], r["Conducteur"], r["Ouvrier"], r["Statut"], r["Tâche"], prod_val, r["Qualité"], r["Observation"], r["Score"]]
-        ws3.append(vals3)
-        ws3.row_dimensions[row_cur3].height = 20
+        ws_ch.merge_cells("D2:I2")
+        ws_ch["D2"] = f"Production totale étanchéité : {round(ch_m2, 1)} m² | Saisies : {len(ch_df)}"
+        ws_ch["D2"].font = Font(name="Calibri", size=9, italic=True, color="555555")
+        ws_ch["D2"].alignment = Alignment(horizontal="right")
+        ws_ch.row_dimensions[2].height = 20
 
-        is_even = (row_cur3 % 2 == 0)
-        fill_c = PatternFill(start_color=GRIS_ZEBRA if is_even else "FFFFFF", end_color=GRIS_ZEBRA if is_even else "FFFFFF", fill_type="solid")
+        # En-tête des colonnes pour ce chantier
+        headers_ch = ["Date", "Conducteur", "Ouvrier", "Statut", "Tâche / Corps d'état", "Production", "Qualité", "Observation", "Score"]
+        ws_ch.append([])
+        ws_ch.append(headers_ch)
+        ws_ch.row_dimensions[4].height = 24
 
-        for c_i in range(1, len(headers_det) + 1):
-            c = ws3.cell(row=row_cur3, column=c_i)
-            c.font = Font(name="Calibri", size=9)
+        for c_i in range(1, len(headers_ch) + 1):
+            c = ws_ch.cell(row=4, column=c_i)
+            c.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+            c.fill = PatternFill(start_color=BLEU_HEADER, end_color=BLEU_HEADER, fill_type="solid")
+            c.alignment = Alignment(horizontal="center", vertical="center")
             c.border = thin_border
-            c.fill = fill_c
-            if c_i in [1, 5, 8, 10]:
-                c.alignment = Alignment(horizontal="center", vertical="center")
-            elif c_i == 7:
-                c.alignment = Alignment(horizontal="right", vertical="center")
-            else:
-                c.alignment = Alignment(horizontal="left", vertical="center")
-        row_cur3 += 1
 
-    for col in ws3.columns:
-        if col[0].row < 3:
-            continue
-        max_len = max(len(str(c.value or '')) for c in col)
-        ws3.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 12)
+        # Lignes de pointage de ce chantier
+        row_ch_idx = 5
+        for _, r in ch_df.iterrows():
+            prod_val = "Bricol" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
+            vals_ch = [r["Date"], r["Conducteur"], r["Ouvrier"], r["Statut"], r["Tâche"], prod_val, r["Qualité"], r["Observation"], r["Score"]]
+            ws_ch.append(vals_ch)
+            ws_ch.row_dimensions[row_ch_idx].height = 20
+
+            is_even = (row_ch_idx % 2 == 0)
+            fill_c = PatternFill(start_color=GRIS_ZEBRA if is_even else "FFFFFF", end_color=GRIS_ZEBRA if is_even else "FFFFFF", fill_type="solid")
+
+            for c_i in range(1, len(headers_ch) + 1):
+                c = ws_ch.cell(row=row_ch_idx, column=c_i)
+                c.font = Font(name="Calibri", size=9)
+                c.border = thin_border
+                c.fill = fill_c
+                if c_i in [1, 4, 7, 9]:
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                elif c_i == 6:
+                    c.alignment = Alignment(horizontal="right", vertical="center")
+                else:
+                    c.alignment = Alignment(horizontal="left", vertical="center")
+            row_ch_idx += 1
+
+        for col in ws_ch.columns:
+            if col[0].row < 4:
+                continue
+            max_len = max(len(str(c.value or '')) for c in col)
+            ws_ch.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 13)
 
     output = io.BytesIO()
     wb.save(output)
     return output.getvalue()
 
 
+# --- NOTIFICATIONS STREAMLIT ---
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
 
@@ -633,7 +565,7 @@ elif menu_general == f"👷 Espace {nom_c2}":
     interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# ESPACE ADMIN
+# ESPACE ADMIN (AVEC SÉPARATION DES CHANTIERS)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
     st.subheader("Accès Sécurisé - Administration")
@@ -672,7 +604,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             st.session_state["admin_active_module"] = None
 
         MODULES_ADMIN = [
-            ("mod_rapport", "📊 Registre & Bilan Mensuel", "Synthèse RH, métrés totaux et export Excel multi-feuilles"),
+            ("mod_rapport", "📊 Registre & Bilan par Chantier", "Séparer chaque chantier sur un onglet Excel indépendant"),
             ("mod_chantiers_taches", "🏗️ Chantiers & Corps d'état", "Ajouter, modifier ou supprimer des chantiers et tâches"),
             ("mod_profils", "👥 Profils & Photos", "Gérer les noms et photos des Conducteurs et Ouvriers"),
             ("mod_chantiers_cond", "👷 Chantiers / Conducteurs", "Attribuer les chantiers sous la responsabilité de chacun"),
@@ -720,11 +652,10 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             st.markdown("---")
 
-            # 1. MODULE BILAN MENSUEL & EXPORT MULTI-FEUILLES
+            # MODULE REGISTRE ET EXPORTATION AVEC CHANTIERS SÉPARÉS
             if mod_actuel == "mod_rapport":
-                st.markdown("### 📊 Registre Officiel & Synthèse Mensuelle")
-                
-                tab_mois, tab_corr = st.tabs(["📅 Bilan Mensuel & Export Excel", "✏️ Corriger une Saisie"])
+                st.markdown("### 📊 Registre & Exportation : Séparation par Chantier")
+                tab_mois, tab_corr = st.tabs(["📅 Bilan Mensuel (Chantiers Séparés)", "✏️ Corriger une Saisie"])
 
                 conn = get_db_connection()
                 query_admin = """
@@ -752,7 +683,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     if df_all.empty:
                         st.warning("⚠️ Aucune donnée enregistrée dans le registre.")
                     else:
-                        # Extraction des mois disponibles (format YYYY-MM)
                         df_all["Mois_Annee"] = df_all["Date"].str.slice(0, 7)
                         mois_disponibles = sorted(df_all["Mois_Annee"].unique().tolist(), reverse=True)
                         
@@ -760,55 +690,52 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         with col_m1:
                             mois_choisi = st.selectbox("📅 Sélectionner le Mois :", mois_disponibles)
                         with col_m2:
-                            filtre_ch_m = st.selectbox("📍 Filtrer par Chantier :", ["Tous les chantiers"] + sorted(df_all["Chantier"].unique().tolist()))
+                            mode_vue = st.radio("Mode d'affichage :", ["Tous les Chantiers (Feuilles Séparées)", "Filtrer un Chantier Précis"], horizontal=True)
 
-                        # Filtrage du mois
                         df_mois_actuel = df_all[df_all["Mois_Annee"] == mois_choisi].copy()
-                        if filtre_ch_m != "Tous les chantiers":
-                            df_mois_actuel = df_mois_actuel[df_mois_actuel["Chantier"] == filtre_ch_m]
 
-                        st.markdown(f"#### 📌 Synthèse de **{mois_choisi}** ({len(df_mois_actuel)} pointages enregistrés)")
+                        if mode_vue == "Filtrer un Chantier Précis":
+                            ch_dispos_mois = sorted(df_mois_actuel["Chantier"].unique().tolist())
+                            ch_cible_filtre = st.selectbox("📍 Chantier sélectionné :", ch_dispos_mois)
+                            df_mois_actuel = df_mois_actuel[df_mois_actuel["Chantier"] == ch_cible_filtre]
 
-                        # Calculs des KPIs du mois
-                        total_ouv_actifs = df_mois_actuel["Ouvrier"].nunique()
-                        total_j_pres = sum(1 for v in df_mois_actuel["Statut"] if "Présent" in str(v))
-                        total_j_demi = sum(1 for v in df_mois_actuel["Statut"] if "1/2" in str(v))
-                        total_j_payes = total_j_pres + (total_j_demi * 0.5)
+                        st.markdown(f"#### 📌 Données de **{mois_choisi}** (`{len(df_mois_actuel)}` pointages enregistrés sur `{df_mois_actuel['Chantier'].nunique()}` chantier(s))")
 
-                        # Somme des m²
-                        df_m2 = df_mois_actuel[(df_mois_actuel["Unite"] == "m²") & (df_mois_actuel["Quantite"] > 0)]
-                        total_m2_prod = df_m2["Quantite"].sum()
+                        # Indicateurs
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("Chantiers Concernés", f"{df_mois_actuel['Chantier'].nunique()}")
+                        c2.metric("Ouvriers Actifs", f"{df_mois_actuel['Ouvrier'].nunique()}")
+                        
+                        p_c = sum(1 for v in df_mois_actuel["Statut"] if "Présent" in str(v))
+                        d_c = sum(1 for v in df_mois_actuel["Statut"] if "1/2" in str(v))
+                        c3.metric("Jours Payés", f"{p_c + (d_c * 0.5)} j")
 
-                        k1, k2, k3, k4 = st.columns(4)
-                        k1.metric("Ouvriers Actifs", f"{total_ouv_actifs}")
-                        k2.metric("Total Jours Payés", f"{total_j_payes} j")
-                        k3.metric("Absences Déclarées", f"{sum(1 for v in df_mois_actuel['Statut'] if 'Absence' in str(v))}")
-                        k4.metric("Production Étanchéité", f"{total_m2_prod:.1f} m²")
+                        m2_tot = df_mois_actuel[(df_mois_actuel["Unite"] == "m²") & (df_mois_actuel["Quantite"] > 0)]["Quantite"].sum()
+                        c4.metric("Production (m²)", f"{m2_tot:.1f} m²")
 
                         st.markdown("---")
-                        st.markdown("#### 📥 Téléchargement du Bilan Mensuel")
-                        st.caption("Le classeur contient 3 feuilles distinctes : **1. Synthèse RH & Jours Payés**, **2. Métrés Totaux par Tâche**, **3. Détail Journalier**.")
+                        st.markdown("#### 📥 Téléchargements Spécialisés")
 
                         if OPENPYXL_DISPO:
-                            excel_mensuel = generer_classeur_mensuel_complet(df_mois_actuel, f"Mois {mois_choisi}")
+                            excel_separe = generer_classeur_par_chantier_separe(df_mois_actuel, f"{mois_choisi}")
                             st.download_button(
-                                f"📗 Télécharger le Bilan Complet de {mois_choisi} (.xlsx)",
-                                data=excel_mensuel,
-                                file_name=f"bilan_mensuel_chantier_{mois_choisi}.xlsx",
+                                f"📗 Télécharger le Classeur Excel avec Feuilles Séparées par Chantier (.xlsx)",
+                                data=excel_separe,
+                                file_name=f"bilan_par_chantier_{mois_choisi}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 use_container_width=True
                             )
                         else:
                             csv_propre = df_mois_actuel.to_csv(index=False, sep=";", encoding="utf-8-sig")
                             st.download_button(
-                                f"📥 Télécharger l'export CSV de {mois_choisi}",
+                                f"📥 Télécharger l'export CSV ({mois_choisi})",
                                 data=csv_propre.encode("utf-8-sig"),
                                 file_name=f"bilan_{mois_choisi}.csv",
                                 mime="text/csv",
                                 use_container_width=True
                             )
 
-                        st.markdown("##### Aperçu des Lignes du Mois :")
+                        st.markdown("##### Détail des Saisies :")
                         df_apercu = df_mois_actuel[["Date", "Chantier", "Conducteur", "Ouvrier", "Statut", "Tâche", "Quantite", "Unite", "Qualité", "Score"]].copy()
                         st.dataframe(df_apercu, use_container_width=True, hide_index=True)
 
