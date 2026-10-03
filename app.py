@@ -434,9 +434,6 @@ menu_general = st.radio(
     horizontal=False
 )
 
-# ==============================================================================
-# INTERFACE CONDUCTEUR EN 2 ÉTAPES (FRANÇAIS PROFESSIONNEL)
-# ==============================================================================
 def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     photo_cond = get_photo_path(conducteur_id_tag)
     
@@ -480,9 +477,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     if presence_data_key not in st.session_state:
         st.session_state[presence_data_key] = {}
 
-    # --------------------------------------------------------------------------
-    # ÉTAPE 1 : POINTAGE (PRÉSENCE / ABSENCE)
-    # --------------------------------------------------------------------------
+    # ÉTAPE 1 : POINTAGE
     if st.session_state[step_key] == 1:
         st.markdown("### 📋 Étape 1 : Présence & Absences")
         st.caption("Sélectionnez le statut de chaque ouvrier puis passez à l'étape suivante.")
@@ -493,7 +488,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             w_nom = row['nom']
             photo_p = get_photo_path(w_nom)
 
-            st.markdown(f"<div class='worker-card'>", unsafe_allow_html=True)
+            st.markdown("<div class='worker-card'>", unsafe_allow_html=True)
             c_av, c_tx = st.columns([1, 4])
             with c_av:
                 if photo_p:
@@ -530,9 +525,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st.session_state[step_key] = 2
             st.rerun()
 
-    # --------------------------------------------------------------------------
-    # ÉTAPE 2 : PRODUCTION & CONTRÔLE D'EXÉCUTION
-    # --------------------------------------------------------------------------
+    # ÉTAPE 2 : PRODUCTION & CONTRÔLE QUALITÉ
     elif st.session_state[step_key] == 2:
         st.markdown("### 🔨 Étape 2 : Production & Appréciation")
         st.caption("Saisie réservée uniquement aux ouvriers présents. Les absences sont validées directement.")
@@ -553,7 +546,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 
             if "Présent" in st_val or "1/2" in st_val:
                 photo_p = get_photo_path(w_nom)
-                st.markdown(f"<div class='worker-card'>", unsafe_allow_html=True)
+                st.markdown("<div class='worker-card'>", unsafe_allow_html=True)
                 c_av, c_tx = st.columns([1, 4])
                 with c_av:
                     if photo_p:
@@ -657,9 +650,16 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st.session_state["sync_notif"] = f"✅ Journée validée pour {chantier_choisi} !"
             st.rerun()
 
+
 # ==============================================================================
-# ESPACE ADMIN (FRANÇAIS PROFESSIONNEL SANS DARIJA)
+# ROUTAGE DES ESPACES
 # ==============================================================================
+if menu_general == f"👷 Espace {nom_c1}":
+    interface_saisie_conducteur("c1", nom_c1)
+
+elif menu_general == f"👷 Espace {nom_c2}":
+    interface_saisie_conducteur("c2", nom_c2)
+
 elif menu_general == "🔐 Espace Admin (Direction)":
     st.subheader("Accès Sécurisé - Administration")
 
@@ -969,7 +969,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     key=f"ms_eq_{ch_cible}_cfg"
                 )
 
-                if st.button(f"💾 Verrouiller l'Équipe", type="primary", use_container_width=True):
+                if st.button("💾 Verrouiller l'Équipe", type="primary", use_container_width=True):
                     conn = get_db_connection()
                     c = conn.cursor()
                     for nom in actuels:
@@ -1107,13 +1107,13 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                     with sub_dl:
                         ouv_del_s = st.selectbox("Ouvrier à supprimer :", df_w_m["nom"].tolist(), key="sel_del_ouv_cfg")
-                        if st.button(f"❌ Supprimer Définitivement", type="secondary", use_container_width=True):
+                        if st.button("❌ Supprimer Définitivement", type="secondary", use_container_width=True):
                             conn = get_db_connection()
                             c = conn.cursor()
                             c.execute("DELETE FROM workers WHERE nom = ?", (ouv_del_s,))
                             conn.commit()
                             conn.close()
-                            st.session_state["sync_notif"] = f"🗑️️ {ouv_del_s} supprimé de la base."
+                            st.session_state["sync_notif"] = f"🗑️ {ouv_del_s} supprimé de la base."
                             st.rerun()
 
             # 7. CHANTIERS & TÂCHES
