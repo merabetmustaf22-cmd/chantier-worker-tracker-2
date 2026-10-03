@@ -7,14 +7,9 @@ import pandas as pd
 from PIL import Image
 import streamlit as st
 
-# Moteur Excel sécurisé
-try:
-    import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-    OPENPYXL_DISPO = True
-except ImportError:
-    OPENPYXL_DISPO = False
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 st.set_page_config(
     page_title="Suivi Chantier & Étanchéité",
@@ -23,7 +18,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Injection CSS Mobile Tactile
 st.markdown("""
 <style>
     @media (max-width: 768px) {
@@ -161,36 +155,6 @@ def init_database():
     
     conn.commit()
     conn.close()
-    recuperer_anciennes_donnees()
-
-def recuperer_anciennes_donnees():
-    anciennes_bases = glob.glob("chantier_*.db")
-    for old_db in anciennes_bases:
-        if old_db == DB_PATH:
-            continue
-        try:
-            conn_old = sqlite3.connect(old_db)
-            c_old = conn_old.cursor()
-            c_old.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pointages'")
-            if c_old.fetchone():
-                c_old.execute("""
-                    SELECT date_jour, chantier, COALESCE(conducteur, 'Conducteur'), worker_id, statut, tache, quantite, unite, appreciation, observation, score 
-                    FROM pointages
-                """)
-                lignes = c_old.fetchall()
-                if lignes:
-                    conn_new = get_db_connection()
-                    c_new = conn_new.cursor()
-                    for r in lignes:
-                        c_new.execute("""
-                            INSERT OR IGNORE INTO pointages (date_jour, chantier, conducteur, worker_id, statut, tache, quantite, unite, appreciation, observation, score)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, r)
-                    conn_new.commit()
-                    conn_new.close()
-            conn_old.close()
-        except Exception:
-            pass
 
 init_database()
 
@@ -248,174 +212,180 @@ def get_photo_path(identifiant):
             return p
     return None
 
-def generer_classeur_par_chantier_separe(df_mois, mois_label):
-    if not OPENPYXL_DISPO:
-        return None
-
+def generer_classeur_pro_excel(df_data, titre_rapport):
     wb = openpyxl.Workbook()
+    
+    BLEU_HEADER = "1E3A8A"
+    BLEU_TITRE = "0F172A"
+    GRIS_ZEBRA = "F8FAFC"
+    GRIS_TOTAL = "E2E8F0"
+    BORDER_COLOR = "CBD5E1"
+    
+    font_titre = Font(name="Segoe UI", size=13, bold=True, color="FFFFFF")
+    font_header = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+    font_body = Font(name="Segoe UI", size=9)
+    font_total = Font(name="Segoe UI", size=10, bold=True)
+    
+    fill_header = PatternFill(start_color=BLEU_HEADER, end_color=BLEU_HEADER, fill_type="solid")
+    fill_titre = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
+    fill_zebra = PatternFill(start_color=GRIS_ZEBRA, end_color=GRIS_ZEBRA, fill_type="solid")
+    fill_white = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    fill_total = PatternFill(start_color=GRIS_TOTAL, end_color=GRIS_TOTAL, fill_type="solid")
+    
+    thin_side = Side(style='thin', color=BORDER_COLOR)
+    cell_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    
+    # 1. FEUILLE SYNTHESE GLOBALE
     ws_sum = wb.active
     ws_sum.title = "Synthèse Générale"
     ws_sum.views.sheetView[0].showGridLines = True
-
-    BLEU_TITRE = "0F2537"
-    BLEU_HEADER = "1E3A5F"
-    BLEU_TOTAL = "E2E8F0"
-    GRIS_ZEBRA = "F8FAFC"
-    BORDURE_COLOR = "CBD5E1"
-
-    thin_border = Border(
-        left=Side(style='thin', color=BORDURE_COLOR),
-        right=Side(style='thin', color=BORDURE_COLOR),
-        top=Side(style='thin', color=BORDURE_COLOR),
-        bottom=Side(style='thin', color=BORDURE_COLOR)
-    )
-
-    ws_sum.merge_cells("A1:F1")
-    ws_sum["A1"] = f"RÉCAPITULATIF DES CHANTIERS — {mois_label.upper()}"
-    ws_sum["A1"].font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
-    ws_sum["A1"].fill = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
+    
+    ws_sum.merge_cells("A1:G1")
+    ws_sum["A1"] = f"RAPPORT GÉNÉRAL DES CHANTIERS — {titre_rapport.upper()}"
+    ws_sum["A1"].font = font_titre
+    ws_sum["A1"].fill = fill_titre
     ws_sum["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    ws_sum.row_dimensions[1].height = 36
-
-    headers_sum = ["Chantier", "Effectif Actif", "Total Jours Payés", "Production Étanchéité (m²)", "Nombre Saisies", "Dernier Conducteur"]
+    ws_sum.row_dimensions[1].height = 40
+    
+    headers_sum = ["Chantier", "Effectif Actif", "Jours Validés", "Production (m²)", "Total Lignes", "Dernier Pointage", "Conducteur"]
     ws_sum.append([])
     ws_sum.append(headers_sum)
     ws_sum.row_dimensions[3].height = 26
-
-    for c_i in range(1, len(headers_sum) + 1):
-        c = ws_sum.cell(row=3, column=c_i)
-        c.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
-        c.fill = PatternFill(start_color=BLEU_HEADER, end_color=BLEU_HEADER, fill_type="solid")
+    
+    for col_idx in range(1, len(headers_sum) + 1):
+        c = ws_sum.cell(row=3, column=col_idx)
+        c.font = font_header
+        c.fill = fill_header
         c.alignment = Alignment(horizontal="center", vertical="center")
-        c.border = thin_border
-
-    chantiers_group = df_mois.groupby("Chantier")
-    row_sum_idx = 4
-    tot_glob_ouv = 0
-    tot_glob_j = 0.0
-    tot_glob_m2 = 0.0
-
-    for ch_nom, ch_df in chantiers_group:
-        nb_ouv = ch_df["Ouvrier"].nunique()
-        p_cnt = sum(1 for v in ch_df["Statut"] if "Présent" in str(v))
-        d_cnt = sum(1 for v in ch_df["Statut"] if "1/2" in str(v))
-        j_payes_ch = p_cnt + (d_cnt * 0.5)
-        m2_ch = ch_df[(ch_df["Unite"] == "m²") & (ch_df["Quantite"] > 0)]["Quantite"].sum()
-        cond_dernier = ch_df["Conducteur"].iloc[-1] if not ch_df.empty else "-"
-
-        vals_sum = [ch_nom, nb_ouv, j_payes_ch, round(m2_ch, 1), len(ch_df), cond_dernier]
-        ws_sum.append(vals_sum)
-        ws_sum.row_dimensions[row_sum_idx].height = 20
-
-        is_even = (row_sum_idx % 2 == 0)
-        fill_c = PatternFill(start_color=GRIS_ZEBRA if is_even else "FFFFFF", end_color=GRIS_ZEBRA if is_even else "FFFFFF", fill_type="solid")
-
-        for c_i in range(1, len(headers_sum) + 1):
-            c = ws_sum.cell(row=row_sum_idx, column=c_i)
-            c.font = Font(name="Calibri", size=9)
-            c.border = thin_border
-            c.fill = fill_c
-            if c_i in [2, 3, 4, 5]:
+        c.border = cell_border
+        
+    row_idx = 4
+    tot_ouv = 0
+    tot_j = 0.0
+    tot_m2 = 0.0
+    
+    for ch_name, grp in df_data.groupby("Chantier"):
+        ouv_c = grp["Ouvrier"].nunique()
+        p_c = sum(1 for v in grp["Statut"] if "Présent" in str(v))
+        d_c = sum(1 for v in grp["Statut"] if "1/2" in str(v))
+        j_c = p_c + (d_c * 0.5)
+        m2_c = grp[(grp["Unite"] == "m²") & (grp["Quantite"] > 0)]["Quantite"].sum()
+        last_date = grp["Date"].max()
+        cond_nom = grp["Conducteur"].iloc[-1]
+        
+        ws_sum.append([ch_name, ouv_c, j_c, round(m2_c, 1), len(grp), last_date, cond_nom])
+        ws_sum.row_dimensions[row_idx].height = 22
+        
+        cur_fill = fill_zebra if row_idx % 2 == 0 else fill_white
+        for col_idx in range(1, len(headers_sum) + 1):
+            c = ws_sum.cell(row=row_idx, column=col_idx)
+            c.font = font_body
+            c.border = cell_border
+            c.fill = cur_fill
+            if col_idx in [2, 3, 4, 5, 6]:
                 c.alignment = Alignment(horizontal="center", vertical="center")
             else:
                 c.alignment = Alignment(horizontal="left", vertical="center")
-
-        tot_glob_ouv += nb_ouv
-        tot_glob_j += j_payes_ch
-        tot_glob_m2 += m2_ch
-        row_sum_idx += 1
-
-    ws_sum.append(["TOTAL GÉNÉRAL", tot_glob_ouv, tot_glob_j, round(tot_glob_m2, 1), len(df_mois), "-"])
-    ws_sum.row_dimensions[row_sum_idx].height = 24
-    for c_i in range(1, len(headers_sum) + 1):
-        c = ws_sum.cell(row=row_sum_idx, column=c_i)
-        c.font = Font(name="Calibri", size=10, bold=True, color="000000")
-        c.fill = PatternFill(start_color=BLEU_TOTAL, end_color=BLEU_TOTAL, fill_type="solid")
-        c.border = thin_border
-        if c_i in [2, 3, 4, 5]:
+                
+        tot_ouv += ouv_c
+        tot_j += j_c
+        tot_m2 += m2_c
+        row_idx += 1
+        
+    ws_sum.append(["TOTAL GÉNÉRAL", tot_ouv, tot_j, round(tot_m2, 1), len(df_data), "-", "-"])
+    ws_sum.row_dimensions[row_idx].height = 26
+    for col_idx in range(1, len(headers_sum) + 1):
+        c = ws_sum.cell(row=row_idx, column=col_idx)
+        c.font = font_total
+        c.fill = fill_total
+        c.border = cell_border
+        if col_idx in [2, 3, 4, 5]:
             c.alignment = Alignment(horizontal="center", vertical="center")
-
+            
     for col in ws_sum.columns:
         if col[0].row < 3:
             continue
-        max_len = max(len(str(c.value or '')) for c in col)
-        ws_sum.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 15)
+        max_l = max(len(str(c.value or '')) for c in col)
+        ws_sum.column_dimensions[get_column_letter(col[0].column)].width = max(max_l + 4, 15)
 
-    for ch_nom, ch_df in chantiers_group:
-        safe_title = ch_nom.replace("/", "-").replace("\\", "-").replace("?", "").replace("*", "")[:28]
+    # 2. FEUILLES SEPAREES PAR CHANTIER
+    headers_detail = ["Date", "Conducteur", "Ouvrier", "Statut", "Corps d'état / Tâche", "Production", "Contrôle Qualité", "Observation", "Score"]
+    
+    for ch_name, grp in df_data.groupby("Chantier"):
+        safe_title = ch_name.replace("/", "-").replace("\\", "-")[:28]
         ws_ch = wb.create_sheet(title=safe_title)
         ws_ch.views.sheetView[0].showGridLines = True
-
+        
         ws_ch.merge_cells("A1:I1")
-        ws_ch["A1"] = f"CHANTIER : {ch_nom.upper()} — BILAN MENSUEL ({mois_label.upper()})"
-        ws_ch["A1"].font = Font(name="Calibri", size=12, bold=True, color="FFFFFF")
-        ws_ch["A1"].fill = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
+        ws_ch["A1"] = f"CHANTIER : {ch_name.upper()} — RAPPORT D'ACTIVITÉ"
+        ws_ch["A1"].font = font_titre
+        ws_ch["A1"].fill = fill_titre
         ws_ch["A1"].alignment = Alignment(horizontal="center", vertical="center")
         ws_ch.row_dimensions[1].height = 36
-
-        ch_ouvriers_cnt = ch_df["Ouvrier"].nunique()
-        ch_p_cnt = sum(1 for v in ch_df["Statut"] if "Présent" in str(v))
-        ch_d_cnt = sum(1 for v in ch_df["Statut"] if "1/2" in str(v))
-        ch_j_payes = ch_p_cnt + (ch_d_cnt * 0.5)
-        ch_m2 = ch_df[(ch_df["Unite"] == "m²") & (ch_df["Quantite"] > 0)]["Quantite"].sum()
-
-        ws_ch.merge_cells("A2:C2")
-        ws_ch["A2"] = f"Effectif actif : {ch_ouvriers_cnt} | Total Jours Payés : {ch_j_payes} j"
-        ws_ch["A2"].font = Font(name="Calibri", size=9, bold=True, color="1E3A5F")
-
-        ws_ch.merge_cells("D2:I2")
-        ws_ch["D2"] = f"Production étanchéité : {round(ch_m2, 1)} m² | Total Saisies : {len(ch_df)}"
-        ws_ch["D2"].font = Font(name="Calibri", size=9, italic=True, color="555555")
-        ws_ch["D2"].alignment = Alignment(horizontal="right")
-        ws_ch.row_dimensions[2].height = 20
-
-        headers_ch = ["Date", "Conducteur", "Ouvrier", "Statut", "Tâche / Corps d'état", "Production", "Qualité", "Observation", "Score"]
+        
+        ouv_c = grp["Ouvrier"].nunique()
+        p_c = sum(1 for v in grp["Statut"] if "Présent" in str(v))
+        d_c = sum(1 for v in grp["Statut"] if "1/2" in str(v))
+        j_c = p_c + (d_c * 0.5)
+        m2_c = grp[(grp["Unite"] == "m²") & (grp["Quantite"] > 0)]["Quantite"].sum()
+        
+        ws_ch.merge_cells("A2:D2")
+        ws_ch["A2"] = f"Effectif : {ouv_c} ouvrier(s) | Jours Payés : {j_c} j"
+        ws_ch["A2"].font = Font(name="Segoe UI", size=10, bold=True, color="1E3A8A")
+        
+        ws_ch.merge_cells("E2:I2")
+        ws_ch["E2"] = f"Production Métrée : {round(m2_c, 1)} m² | Total Saisies : {len(grp)}"
+        ws_ch["E2"].font = Font(name="Segoe UI", size=10, bold=True, color="475569")
+        ws_ch["E2"].alignment = Alignment(horizontal="right")
+        ws_ch.row_dimensions[2].height = 22
+        
         ws_ch.append([])
-        ws_ch.append(headers_ch)
-        ws_ch.row_dimensions[4].height = 24
-
-        for c_i in range(1, len(headers_ch) + 1):
-            c = ws_ch.cell(row=4, column=c_i)
-            c.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
-            c.fill = PatternFill(start_color=BLEU_HEADER, end_color=BLEU_HEADER, fill_type="solid")
+        ws_ch.append(headers_detail)
+        ws_ch.row_dimensions[4].height = 25
+        
+        for col_idx in range(1, len(headers_detail) + 1):
+            c = ws_ch.cell(row=4, column=col_idx)
+            c.font = font_header
+            c.fill = fill_header
             c.alignment = Alignment(horizontal="center", vertical="center")
-            c.border = thin_border
-
-        row_ch_idx = 5
-        for _, r in ch_df.iterrows():
-            prod_val = "Bricolage" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
-            vals_ch = [r["Date"], r["Conducteur"], r["Ouvrier"], r["Statut"], r["Tâche"], prod_val, r["Qualité"], r["Observation"], r["Score"]]
-            ws_ch.append(vals_ch)
-            ws_ch.row_dimensions[row_ch_idx].height = 20
-
-            is_even = (row_ch_idx % 2 == 0)
-            fill_c = PatternFill(start_color=GRIS_ZEBRA if is_even else "FFFFFF", end_color=GRIS_ZEBRA if is_even else "FFFFFF", fill_type="solid")
-
-            for c_i in range(1, len(headers_ch) + 1):
-                c = ws_ch.cell(row=row_ch_idx, column=c_i)
-                c.font = Font(name="Calibri", size=9)
-                c.border = thin_border
-                c.fill = fill_c
-                if c_i in [1, 4, 7, 9]:
+            c.border = cell_border
+            
+        r_idx = 5
+        for _, r in grp.iterrows():
+            prod_aff = "Bricolage" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
+            qual_clean = str(r["Qualité"]).replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
+            
+            vals = [
+                r["Date"], r["Conducteur"], r["Ouvrier"], r["Statut"],
+                r["Tâche"], prod_aff, qual_clean, r["Observation"], r["Score"]
+            ]
+            ws_ch.append(vals)
+            ws_ch.row_dimensions[r_idx].height = 20
+            
+            c_fill = fill_zebra if r_idx % 2 == 0 else fill_white
+            for col_idx in range(1, len(headers_detail) + 1):
+                c = ws_ch.cell(row=r_idx, column=col_idx)
+                c.font = font_body
+                c.border = cell_border
+                c.fill = c_fill
+                if col_idx in [1, 4, 7, 9]:
                     c.alignment = Alignment(horizontal="center", vertical="center")
-                elif c_i == 6:
+                elif col_idx == 6:
                     c.alignment = Alignment(horizontal="right", vertical="center")
                 else:
                     c.alignment = Alignment(horizontal="left", vertical="center")
-            row_ch_idx += 1
-
+            r_idx += 1
+            
         for col in ws_ch.columns:
             if col[0].row < 4:
                 continue
-            max_len = max(len(str(c.value or '')) for c in col)
-            ws_ch.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 13)
+            max_l = max(len(str(c.value or '')) for c in col)
+            ws_ch.column_dimensions[get_column_letter(col[0].column)].width = max(max_l + 4, 14)
 
-    output = io.BytesIO()
-    wb.save(output)
-    return output.getvalue()
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
-
-# Notifications
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
 
@@ -434,9 +404,6 @@ menu_general = st.radio(
     horizontal=False
 )
 
-# ==============================================================================
-# INTERFACE CONDUCTEUR EN 2 ÉTAPES (AVEC DISPARITION DES CHANTIERS TERMINÉS)
-# ==============================================================================
 def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     photo_cond = get_photo_path(conducteur_id_tag)
     
@@ -457,23 +424,19 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
         st.warning(f"⚠️ Aucun chantier attribué à {default_nom}.\n\nVeuillez contacter l'administrateur.")
         return
 
-    # Séparation : chantiers restants à faire vs chantiers déjà validés
     chantiers_non_faits = [ch for ch in chantiers_autorises if not est_deja_valide(date_str, ch)]
     chantiers_faits = [ch for ch in chantiers_autorises if est_deja_valide(date_str, ch)]
 
-    # Si tous les chantiers sont terminés pour ce jour
     if not chantiers_non_faits:
         st.success(f"🎉 Tous vos chantiers du {date_str} ont été pointés et validés avec succès !")
-        st.markdown(f"**Chantiers complétés aujourd'hui :** `{', '.join(chantiers_faits)}`")
+        st.markdown(f"**Chantiers complétés :** `{', '.join(chantiers_faits)}`")
         
-        # Option facultative pour réviser un chantier déjà validé
         st.markdown("---")
-        afficher_modif = st.checkbox("Modifier ou revoir un chantier déjà validé", key=f"cb_rev_{conducteur_id_tag}")
+        afficher_modif = st.checkbox("Modifier un chantier déjà validé", key=f"cb_rev_{conducteur_id_tag}")
         if not afficher_modif:
             return
         liste_options_chantiers = chantiers_faits
     else:
-        # La liste n'affiche QUE les chantiers qui n'ont pas encore été faits
         liste_options_chantiers = chantiers_non_faits
 
     chantier_choisi = st.selectbox("📍 Sélectionner le Chantier à pointer", liste_options_chantiers, key=f"ch_sel_{conducteur_id_tag}")
@@ -499,9 +462,6 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     if presence_data_key not in st.session_state:
         st.session_state[presence_data_key] = {}
 
-    # --------------------------------------------------------------------------
-    # ÉTAPE 1 : POINTAGE (PRÉSENCE / ABSENCE)
-    # --------------------------------------------------------------------------
     if st.session_state[step_key] == 1:
         st.markdown("### 📋 Étape 1 : Présence & Absences")
         st.caption("Sélectionnez le statut de chaque ouvrier puis passez à l'étape suivante.")
@@ -549,9 +509,6 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st.session_state[step_key] = 2
             st.rerun()
 
-    # --------------------------------------------------------------------------
-    # ÉTAPE 2 : PRODUCTION & CONTRÔLE QUALITÉ
-    # --------------------------------------------------------------------------
     elif st.session_state[step_key] == 2:
         st.markdown("### 🔨 Étape 2 : Production & Appréciation")
         st.caption("Saisie uniquement pour les présents. Les absences sont validées automatiquement.")
@@ -598,10 +555,10 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                     eval_ouvrier = st.selectbox(
                         "Rendement / Implication :",
                         [
-                            "🟢 Très bon rendement (Excellent)",
-                            "🟢 Bon travail (Régulier)",
-                            "🟡 Rendement moyen (Moyen)",
-                            "🔴 Faible rendement (À surveiller)"
+                            "Très bon rendement (Excellent)",
+                            "Bon travail (Régulier)",
+                            "Rendement moyen (Moyen)",
+                            "Faible rendement (À surveiller)"
                         ],
                         key=f"eval_kh_{conducteur_id_tag}_{w_id}"
                     )
@@ -609,9 +566,9 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                     apprec_qualite = st.selectbox(
                         "Qualité d'exécution :",
                         [
-                            "🟢 Conforme / Soigné",
-                            "🟡 Acceptable",
-                            "🔴 Non conforme / À reprendre"
+                            "Conforme / Soigné",
+                            "Acceptable",
+                            "Non conforme / À reprendre"
                         ],
                         key=f"qual_{conducteur_id_tag}_{w_id}"
                     )
@@ -676,9 +633,6 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st.session_state["sync_notif"] = f"✅ Pointage validé avec succès pour {chantier_choisi} !"
             st.rerun()
 
-# ==============================================================================
-# ROUTAGE DES ESPACES
-# ==============================================================================
 if menu_general == f"👷 Espace {nom_c1}":
     interface_saisie_conducteur("c1", nom_c1)
 
@@ -746,7 +700,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             st.markdown("---")
 
-            # 1. BILAN MENSUEL ET RAPPORTS
             if mod_actuel == "mod_rapport":
                 st.markdown("### 📊 Bilan Mensuel & Rapports")
 
@@ -836,30 +789,16 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.dataframe(df_vue_detail[cols_finales], use_container_width=True, hide_index=True)
 
                     st.markdown("#### 📥 Téléchargements")
-                    col_dl1, col_dl2 = st.columns(2)
-                    with col_dl1:
-                        if OPENPYXL_DISPO:
-                            excel_separe = generer_classeur_par_chantier_separe(df_mois_actuel, mois_choisi)
-                            st.download_button(
-                                f"📗 Télécharger Excel (.xlsx) par Chantier",
-                                data=excel_separe,
-                                file_name=f"bilan_chantiers_{mois_choisi}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
-                        else:
-                            st.caption("💡 Le fichier CSV s'ouvre parfaitement dans Excel.")
-                    with col_dl2:
-                        csv_propre = df_vue_detail[cols_finales].to_csv(index=False, sep=";", encoding="utf-8-sig")
-                        st.download_button(
-                            f"📥 Télécharger CSV ({mois_choisi})",
-                            data=csv_propre.encode("utf-8-sig"),
-                            file_name=f"registre_{mois_choisi}.csv",
-                            mime="text/csv",
-                            use_container_width=True
-                        )
+                    excel_pro_bytes = generer_classeur_pro_excel(df_mois_actuel, mois_choisi)
+                    st.download_button(
+                        label="📗 Télécharger le Rapport Excel (.xlsx) Formate & Organisé",
+                        data=excel_pro_bytes,
+                        file_name=f"rapport_chantiers_{mois_choisi}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        type="primary",
+                        use_container_width=True
+                    )
 
-            # 2. CORRIGER UN POINTAGE
             elif mod_actuel == "mod_corriger":
                 st.markdown("### ✏️ Corriger un Pointage")
                 
@@ -913,8 +852,13 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         mod_qte = 1.0
                         mod_unite = "Sans métrage"
 
-                    qualites_possibles = ["🟢 Conforme / Soigné", "🟡 Acceptable", "🔴 Non conforme / À reprendre"]
-                    idx_qual = qualites_possibles.index(row_sel["Qualité"]) if row_sel["Qualité"] in qualites_possibles else 0
+                    qualites_possibles = ["Conforme / Soigné", "Acceptable", "Non conforme / À reprendre"]
+                    clean_qual_existante = str(row_sel["Qualité"]).replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
+                    idx_qual = 0
+                    for idx_q, q_label in enumerate(qualites_possibles):
+                        if clean_qual_existante in q_label or q_label in clean_qual_existante:
+                            idx_qual = idx_q
+                            break
                     mod_apprec = st.selectbox("Qualité :", qualites_possibles, index=idx_qual, key=f"mod_qual_{pt_id}")
 
                     mod_obs = st.text_input("Observation :", value=str(row_sel["Observation"]) if row_sel["Observation"] != "-" else "", key=f"mod_obs_{pt_id}")
@@ -956,7 +900,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             st.session_state["sync_notif"] = f"🗑️ Pointage #{pt_id} supprimé."
                             st.rerun()
 
-            # 3. TRANSFÉRER UN OUVRIER
             elif mod_actuel == "mod_transfert":
                 st.markdown("### 🔄 Transférer un Ouvrier")
                 df_w_tr = get_workers_df()
@@ -974,7 +917,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.session_state["sync_notif"] = f"🔄 {ouv_sel} transféré vers {dest_ch} !"
                     st.rerun()
 
-            # 4. ÉQUIPES PAR CHANTIER (EXCLUSION AUTOMATIQUE DES AFFECTÉS)
             elif mod_actuel == "mod_equipes":
                 st.markdown("### ⚡ Équipes par Chantier")
                 ch_dispos_actifs = [c for c in get_all_chantiers() if c != "EN ATTENTE / DEPOT"]
@@ -1007,7 +949,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.session_state["sync_notif"] = f"🔄 Équipe de {ch_cible} enregistrée ({len(nouv_eq)} ouvriers) !"
                     st.rerun()
 
-            # 5. AFFECTER LES CHANTIERS
             elif mod_actuel == "mod_chantiers_cond":
                 st.markdown("### 👷 Affecter les Chantiers")
                 ch_dispos = [c for c in get_all_chantiers() if c != "EN ATTENTE / DEPOT"]
@@ -1034,7 +975,6 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.session_state["sync_notif"] = "🔄 Affectations sauvegardées !"
                     st.rerun()
 
-            # 6. PROFILS & PHOTOS
             elif mod_actuel == "mod_profils":
                 st.markdown("### 👥 Profils & Photos")
                 tab_cond, tab_ouv = st.tabs(["👷 Conducteurs", "👷 Ouvriers"])
@@ -1069,7 +1009,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                 with tab_ouv:
                     df_w_m = get_workers_df()
-                    sub_ed, sub_ad, sub_dl = st.tabs(["✏️️ Modifier", "➕ Ajouter", "🗑️ Supprimer"])
+                    sub_ed, sub_ad, sub_dl = st.tabs(["✏️ Modifier", "➕ Ajouter", "🗑️ Supprimer"])
                     with sub_ed:
                         o_sel = st.selectbox("Sélectionner l'ouvrier :", df_w_m["nom"].tolist(), key="sel_ouv_cfg")
                         ph_o = get_photo_path(o_sel)
@@ -1124,7 +1064,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                     if ph_nouv is not None:
                                         ext = ph_nouv.name.split(".")[-1].lower()
                                         Image.open(ph_nouv).save(os.path.join(PHOTOS_DIR, f"{n_net.replace(' ', '_')}.{ext}"))
-                                    st.session_state["sync_notif"] = f"✅ {n_net} ajouté avec succès !"
+                                    st.session_state["sync_notif"] = f"✅ {n_net} ajouté !"
                                     st.rerun()
                                 except sqlite3.IntegrityError:
                                     conn.close()
@@ -1138,10 +1078,9 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             c.execute("DELETE FROM workers WHERE nom = ?", (ouv_del_s,))
                             conn.commit()
                             conn.close()
-                            st.session_state["sync_notif"] = f"🗑 {ouv_del_s} supprimé de la base."
+                            st.session_state["sync_notif"] = f"🗑️ {ouv_del_s} supprimé de la base."
                             st.rerun()
 
-            # 7. CHANTIERS & TÂCHES
             elif mod_actuel == "mod_chantiers_taches":
                 st.markdown("### 🏗️ Chantiers & Tâches")
                 tab_ch, tab_tch = st.tabs(["📍 Chantiers", "🔨 Tâches"])
