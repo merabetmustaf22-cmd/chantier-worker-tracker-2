@@ -271,13 +271,13 @@ def generer_classeur_par_chantier_separe(df_mois, mois_label):
     )
 
     ws_sum.merge_cells("A1:F1")
-    ws_sum["A1"] = f"RÉCAPITULATIF DE TOUS LES CHANTIERS — {mois_label.upper()}"
+    ws_sum["A1"] = f"RÉCAPITULATIF DES CHANTIERS — {mois_label.upper()}"
     ws_sum["A1"].font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
     ws_sum["A1"].fill = PatternFill(start_color=BLEU_TITRE, end_color=BLEU_TITRE, fill_type="solid")
     ws_sum["A1"].alignment = Alignment(horizontal="center", vertical="center")
     ws_sum.row_dimensions[1].height = 36
 
-    headers_sum = ["Chantier", "Ouvriers Déployés", "Total Jours Payés", "Production Étanchéité (m²)", "Total Lignes Saisies", "Dernier Conducteur"]
+    headers_sum = ["Chantier", "Effectif Actif", "Total Jours Payés", "Production Étanchéité (m²)", "Nombre Saisies", "Dernier Conducteur"]
     ws_sum.append([])
     ws_sum.append(headers_sum)
     ws_sum.row_dimensions[3].height = 26
@@ -360,11 +360,11 @@ def generer_classeur_par_chantier_separe(df_mois, mois_label):
         ch_m2 = ch_df[(ch_df["Unite"] == "m²") & (ch_df["Quantite"] > 0)]["Quantite"].sum()
 
         ws_ch.merge_cells("A2:C2")
-        ws_ch["A2"] = f"Effectif actif : {ch_ouvriers_cnt} ouvriers | Total Jours Payés : {ch_j_payes} j"
+        ws_ch["A2"] = f"Effectif actif : {ch_ouvriers_cnt} | Total Jours Payés : {ch_j_payes} j"
         ws_ch["A2"].font = Font(name="Calibri", size=9, bold=True, color="1E3A5F")
 
         ws_ch.merge_cells("D2:I2")
-        ws_ch["D2"] = f"Production totale étanchéité : {round(ch_m2, 1)} m² | Saisies : {len(ch_df)}"
+        ws_ch["D2"] = f"Production étanchéité : {round(ch_m2, 1)} m² | Total Saisies : {len(ch_df)}"
         ws_ch["D2"].font = Font(name="Calibri", size=9, italic=True, color="555555")
         ws_ch["D2"].alignment = Alignment(horizontal="right")
         ws_ch.row_dimensions[2].height = 20
@@ -383,7 +383,7 @@ def generer_classeur_par_chantier_separe(df_mois, mois_label):
 
         row_ch_idx = 5
         for _, r in ch_df.iterrows():
-            prod_val = "Bricol" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
+            prod_val = "Bricolage" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
             vals_ch = [r["Date"], r["Conducteur"], r["Ouvrier"], r["Statut"], r["Tâche"], prod_val, r["Qualité"], r["Observation"], r["Score"]]
             ws_ch.append(vals_ch)
             ws_ch.row_dimensions[row_ch_idx].height = 20
@@ -435,7 +435,7 @@ menu_general = st.radio(
 )
 
 # ==============================================================================
-# INTERFACE CONDUCTEUR EN 2 ÉTAPES (POINTAGE ➔ PRODUCTION / RENDEMENT)
+# INTERFACE CONDUCTEUR EN 2 ÉTAPES (FRANÇAIS PROFESSIONNEL)
 # ==============================================================================
 def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     photo_cond = get_photo_path(conducteur_id_tag)
@@ -453,10 +453,10 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     chantiers_autorises = get_chantiers_conducteur(conducteur_id_tag)
 
     if not chantiers_autorises:
-        st.warning(f"⚠️ Aucun chantier attribué à {default_nom}.\n\nDemandez à l'Admin de vous affecter vos chantiers.")
+        st.warning(f"⚠️ Aucun chantier attribué à {default_nom}.\n\nVeuillez contacter l'administrateur.")
         return
 
-    chantier_choisi = st.selectbox("📍 Chantier", chantiers_autorises, key=f"ch_sel_{conducteur_id_tag}")
+    chantier_choisi = st.selectbox("📍 Sélectionner le Chantier", chantiers_autorises, key=f"ch_sel_{conducteur_id_tag}")
     date_str = str(date_choisie)
     deja_fait = est_deja_valide(date_str, chantier_choisi)
 
@@ -466,13 +466,12 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     df_w = get_workers_df()
     equipe_active = df_w[df_w["chantier_fixe"] == chantier_choisi]
 
-    st.markdown(f"**Équipe active :** `{len(equipe_active)}` ouvrier(s)")
+    st.markdown(f"**Effectif présent :** `{len(equipe_active)}` ouvrier(s)")
 
     if equipe_active.empty:
-        st.warning(f"⚠️ Aucun ouvrier sur {chantier_choisi}.")
+        st.warning(f"⚠️ Aucun ouvrier affecté à {chantier_choisi}.")
         return
 
-    # Gestion de l'étape courante (1 ou 2)
     step_key = f"step_{conducteur_id_tag}_{chantier_choisi}"
     if step_key not in st.session_state:
         st.session_state[step_key] = 1
@@ -485,8 +484,8 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     # ÉTAPE 1 : POINTAGE (PRÉSENCE / ABSENCE)
     # --------------------------------------------------------------------------
     if st.session_state[step_key] == 1:
-        st.markdown("### 📋 Étape 1 : Pointage & Présence")
-        st.caption("Cochez le statut de chaque ouvrier, puis cliquez sur Suivant.")
+        st.markdown("### 📋 Étape 1 : Présence & Absences")
+        st.caption("Sélectionnez le statut de chaque ouvrier puis passez à l'étape suivante.")
 
         presence_temp = {}
         for _, row in equipe_active.iterrows():
@@ -505,7 +504,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                 st.markdown(f"**{w_nom}**")
 
             statut_val = st.selectbox(
-                "Statut présence :",
+                "Statut de présence :",
                 [
                     "Présent (Journée)",
                     "1/2 journée",
@@ -517,7 +516,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
 
             motif_abs = ""
             if "Absence" in statut_val:
-                motif_abs = st.text_input("Motif d'absence :", placeholder="Ex: congé, maladie...", key=f"abs_m_{conducteur_id_tag}_{w_id}")
+                motif_abs = st.text_input("Motif de l'absence :", placeholder="Ex: congé, maladie, arrêt...", key=f"abs_m_{conducteur_id_tag}_{w_id}")
 
             st.markdown("</div>", unsafe_allow_html=True)
             presence_temp[w_id] = {
@@ -526,19 +525,19 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                 "motif_absence": motif_abs
             }
 
-        if st.button("➡️ Étape 2 : Production & Travail des Présents", type="primary", use_container_width=True):
+        if st.button("➡️ Étape 2 : Production & Travaux des Présents", type="primary", use_container_width=True):
             st.session_state[presence_data_key] = presence_temp
             st.session_state[step_key] = 2
             st.rerun()
 
     # --------------------------------------------------------------------------
-    # ÉTAPE 2 : PRODUCTION & ÉVALUATION (KHADMA TA3 EL KHADDAME)
+    # ÉTAPE 2 : PRODUCTION & CONTRÔLE D'EXÉCUTION
     # --------------------------------------------------------------------------
     elif st.session_state[step_key] == 2:
-        st.markdown("### 🔨 Étape 2 : Tâches, Rendement & Évaluation")
-        st.caption("Saisie uniquement pour les ouvriers présents. Les absents sont validés automatiquement.")
+        st.markdown("### 🔨 Étape 2 : Production & Appréciation")
+        st.caption("Saisie réservée uniquement aux ouvriers présents. Les absences sont validées directement.")
 
-        if st.button("⬅️ Revenir au Pointage (Étape 1)", use_container_width=True):
+        if st.button("⬅️ Retour au Pointage (Étape 1)", use_container_width=True):
             st.session_state[step_key] = 1
             st.rerun()
 
@@ -552,7 +551,6 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             infos_p = presence_enregistree.get(w_id, {"statut": "Présent (Journée)", "motif_absence": ""})
             st_val = infos_p["statut"]
 
-            # Ouvrier présent ou demi-journée
             if "Présent" in st_val or "1/2" in st_val:
                 photo_p = get_photo_path(w_nom)
                 st.markdown(f"<div class='worker-card'>", unsafe_allow_html=True)
@@ -565,10 +563,9 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                 with c_tx:
                     st.markdown(f"**{w_nom}** (`{st_val}`)")
 
-                # TÂCHE / CORPS D'ÉTAT
-                tache_val = st.selectbox("Tâche / Activité :", toutes_les_taches, key=f"tch2_{conducteur_id_tag}_{w_id}")
+                tache_val = st.selectbox("Corps d'état / Tâche :", toutes_les_taches, key=f"tch2_{conducteur_id_tag}_{w_id}")
                 est_bricol_defaut = ("BRICOL" in tache_val.upper()) or (tache_val in ["DIVERS", "nettoyage", "PONSAGE"])
-                type_travail = st.selectbox("Type d'activité :", ["Métrage (m² / ml)", "Bricol / Sans métrage"], index=1 if est_bricol_defaut else 0, key=f"typ2_{conducteur_id_tag}_{w_id}")
+                type_travail = st.selectbox("Type d'activité :", ["Métrage (m² / ml)", "Bricolage / Sans métrage"], index=1 if est_bricol_defaut else 0, key=f"typ2_{conducteur_id_tag}_{w_id}")
 
                 if type_travail == "Métrage (m² / ml)":
                     qte_val = st.number_input("Métré réalisé :", min_value=0.0, step=1.0, value=25.0, key=f"qte2_{conducteur_id_tag}_{w_id}")
@@ -577,22 +574,21 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                     unite_val = "Sans métrage"
                     qte_val = 1.0
 
-                # ÉVALUATION DE LA KHADMA DU KHADDAME (ÉVALUATION DU RENDEMENT & QUALITÉ)
                 c_ev1, c_ev2 = st.columns(2)
                 with c_ev1:
-                    eval_khaddame = st.selectbox(
-                        "Khadma ta3 el khaddame :",
+                    eval_ouvrier = st.selectbox(
+                        "Rendement / Implication :",
                         [
-                            "🟢 Khaddem mlih bzaf (Excellent)",
-                            "🟢 Mlih (Bon travail)",
-                            "🟡 Moyen / Noss noss",
-                            "🔴 3eyan / À surveiller"
+                            "🟢 Très bon rendement (Excellent)",
+                            "🟢 Bon travail (Régulier)",
+                            "🟡 Rendement moyen (Moyen)",
+                            "🔴 Faible rendement (À surveiller)"
                         ],
                         key=f"eval_kh_{conducteur_id_tag}_{w_id}"
                     )
                 with c_ev2:
                     apprec_qualite = st.selectbox(
-                        "Contrôle Qualité :",
+                        "Qualité d'exécution :",
                         [
                             "🟢 Conforme / Soigné",
                             "🟡 Acceptable",
@@ -601,7 +597,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                         key=f"qual_{conducteur_id_tag}_{w_id}"
                     )
 
-                obs_val = st.text_input("Observation libre :", placeholder="Ex: terrasse sud, relevés...", key=f"obs2_{conducteur_id_tag}_{w_id}")
+                obs_val = st.text_input("Observation libre :", placeholder="Ex: terrasse sud, acrotères...", key=f"obs2_{conducteur_id_tag}_{w_id}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
                 donnees_finales[w_id] = {
@@ -610,11 +606,10 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                     "quantite": qte_val,
                     "unite": unite_val,
                     "appreciation": apprec_qualite,
-                    "observation": f"{eval_khaddame} | {obs_val}" if obs_val else eval_khaddame,
-                    "eval_travailleur": eval_khaddame
+                    "observation": f"{eval_ouvrier} | {obs_val}" if obs_val else eval_ouvrier,
+                    "eval_travailleur": eval_ouvrier
                 }
             else:
-                # Ouvrier absent : pas de saisie nécessaire
                 donnees_finales[w_id] = {
                     "statut": st_val,
                     "tache": "-",
@@ -635,14 +630,14 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                 qte = d["quantite"]
                 unite = d["unite"]
                 app = d["appreciation"]
-                eval_kh = d.get("eval_travailleur", "-")
+                eval_w = d.get("eval_travailleur", "-")
 
                 if "Présent" in st_val:
                     base_p = 35.0
                     pts_prod = 35.0 if (unite == "Sans métrage" or qte >= 30) else (25.0 if qte >= 20 else 15.0)
                     pts_app = 20.0 if "Conforme" in app else (10.0 if "Acceptable" in app else 0.0)
-                    pts_khadma = 10.0 if "Excellent" in eval_kh else (8.0 if "Bon" in eval_kh else (4.0 if "Moyen" in eval_kh else 0.0))
-                    score = min(base_p + pts_prod + pts_app + pts_khadma, 100.0)
+                    pts_w = 10.0 if "Excellent" in eval_w else (8.0 if "Régulier" in eval_w else (4.0 if "Moyen" in eval_w else 0.0))
+                    score = min(base_p + pts_prod + pts_app + pts_w, 100.0)
                 elif "1/2" in st_val:
                     score = 35.0
                 elif "Autorisée" in st_val:
@@ -663,16 +658,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st.rerun()
 
 # ==============================================================================
-# ESPACES CONDUCTEURS
-# ==============================================================================
-if menu_general == f"👷 Espace {nom_c1}":
-    interface_saisie_conducteur("c1", nom_c1)
-
-elif menu_general == f"👷 Espace {nom_c2}":
-    interface_saisie_conducteur("c2", nom_c2)
-
-# ==============================================================================
-# ESPACE ADMIN
+# ESPACE ADMIN (FRANÇAIS PROFESSIONNEL SANS DARIJA)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
     st.subheader("Accès Sécurisé - Administration")
@@ -681,7 +667,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
         st.session_state["admin_logged_in"] = False
 
     if not st.session_state["admin_logged_in"]:
-        mdp = st.text_input("Mot de passe Admin", type="password", placeholder="Entrez le mot de passe...")
+        mdp = st.text_input("Mot de passe Administrateur", type="password", placeholder="Entrez le mot de passe...")
         if st.button("Connexion", type="primary", use_container_width=True):
             if mdp == ADMIN_PASSWORD:
                 st.session_state["admin_logged_in"] = True
@@ -818,10 +804,10 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     st.markdown("#### 2. Registre Détaillé des Pointages")
                     df_vue_detail = df_mois_actuel.copy()
                     df_vue_detail["Production"] = df_vue_detail.apply(
-                        lambda r: "Bricol" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-"),
+                        lambda r: "Bricolage" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-"),
                         axis=1
                     )
-                    cols_finales = ["Chantier", "Date", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Observation", "Score"]
+                    cols_finales = ["Chantier", "Date", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Score"]
                     st.dataframe(df_vue_detail[cols_finales], use_container_width=True, hide_index=True)
 
                     st.markdown("#### 📥 Téléchargements")
@@ -837,7 +823,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                 use_container_width=True
                             )
                         else:
-                            st.caption("💡 Le CSV ci-contre s'ouvre parfaitement dans Excel.")
+                            st.caption("💡 Le fichier CSV s'ouvre parfaitement dans Excel.")
                     with col_dl2:
                         csv_propre = df_vue_detail[cols_finales].to_csv(index=False, sep=";", encoding="utf-8-sig")
                         st.download_button(
@@ -894,7 +880,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     idx_tch = toutes_les_taches_dispos.index(row_sel["Tâche"]) if row_sel["Tâche"] in toutes_les_taches_dispos else 0
                     mod_tache = st.selectbox("Tâche :", toutes_les_taches_dispos, index=idx_tch, key=f"mod_tch_{pt_id}")
 
-                    type_activite_mod = st.selectbox("Type :", ["Métrage (m² / ml)", "Bricol / Sans métrage"], index=1 if row_sel["Unite"] == "Sans métrage" else 0, key=f"mod_typ_{pt_id}")
+                    type_activite_mod = st.selectbox("Type :", ["Métrage (m² / ml)", "Bricolage / Sans métrage"], index=1 if row_sel["Unite"] == "Sans métrage" else 0, key=f"mod_typ_{pt_id}")
                     if type_activite_mod == "Métrage (m² / ml)":
                         mod_qte = st.number_input("Quantité :", min_value=0.0, step=1.0, value=float(row_sel["Quantite"]), key=f"mod_qte_{pt_id}")
                         mod_unite = "m²"
@@ -1100,7 +1086,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     with sub_ad:
                         nom_nouv = st.text_input("Nom et prénom :", key="in_add_w_nom_cfg")
                         ch_init = st.selectbox("Chantier initial :", get_all_chantiers(), key="in_add_w_ch_cfg")
-                        ph_nouv = st.file_uploader("Photo profil :", type=["jpg", "jpeg", "png"], key=in_add_w_ph_cfg)
+                        ph_nouv = st.file_uploader("Photo profil :", type=["jpg", "jpeg", "png"], key="in_add_w_ph_cfg")
                         if st.button("➕ Ajouter l'Ouvrier", type="primary", use_container_width=True):
                             n_net = nom_nouv.strip()
                             if n_net:
@@ -1113,7 +1099,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                                     if ph_nouv is not None:
                                         ext = ph_nouv.name.split(".")[-1].lower()
                                         Image.open(ph_nouv).save(os.path.join(PHOTOS_DIR, f"{n_net.replace(' ', '_')}.{ext}"))
-                                    st.session_state["sync_notif"] = f"✅ {n_net} ajouté !"
+                                    st.session_state["sync_notif"] = f"✅ {n_net} ajouté avec succès !"
                                     st.rerun()
                                 except sqlite3.IntegrityError:
                                     conn.close()
