@@ -7,7 +7,7 @@ import pandas as pd
 from PIL import Image
 import streamlit as st
 
-# Moteur de style Excel
+# Moteur Excel sécurisé pour Streamlit Cloud
 try:
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -19,7 +19,7 @@ except ImportError:
 st.set_page_config(
     page_title="Suivi de Chantier & Étanchéité",
     page_icon="🏗️",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="collapsed",
 )
 
@@ -215,17 +215,14 @@ def get_photo_path(identifiant):
             return p
     return None
 
-# ==============================================================================
-# GÉNÉRATEUR EXCEL : AVEC FEUILLES SÉPARÉES PAR CHANTIER
-# ==============================================================================
 def generer_classeur_par_chantier_separe(df_mois, mois_label):
-    """Génère un classeur Excel avec un onglet dédié pour CHAQUE chantier + une feuille récap globale."""
     if not OPENPYXL_DISPO:
         return None
 
     wb = openpyxl.Workbook()
-    # Supprimer la feuille par défaut après
-    ws_initial = wb.active
+    ws_sum = wb.active
+    ws_sum.title = "Synthèse Générale"
+    ws_sum.views.sheetView[0].showGridLines = True
 
     BLEU_TITRE = "0F2537"
     BLEU_HEADER = "1E3A5F"
@@ -239,11 +236,6 @@ def generer_classeur_par_chantier_separe(df_mois, mois_label):
         top=Side(style='thin', color=BORDURE_COLOR),
         bottom=Side(style='thin', color=BORDURE_COLOR)
     )
-
-    # 1. FEUILLE SOMMAIRE GLOBAL
-    ws_sum = ws_initial
-    ws_sum.title = "Synthèse Générale"
-    ws_sum.views.sheetView[0].showGridLines = True
 
     ws_sum.merge_cells("A1:F1")
     ws_sum["A1"] = f"RÉCAPITULATIF DE TOUS LES CHANTIERS — {mois_label.upper()}"
@@ -301,7 +293,6 @@ def generer_classeur_par_chantier_separe(df_mois, mois_label):
         tot_glob_m2 += m2_ch
         row_sum_idx += 1
 
-    # Ligne total globale
     ws_sum.append(["TOTAL GÉNÉRAL", tot_glob_ouv, tot_glob_j, round(tot_glob_m2, 1), len(df_mois), "-"])
     ws_sum.row_dimensions[row_sum_idx].height = 24
     for c_i in range(1, len(headers_sum) + 1):
@@ -318,14 +309,12 @@ def generer_classeur_par_chantier_separe(df_mois, mois_label):
         max_len = max(len(str(c.value or '')) for c in col)
         ws_sum.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 15)
 
-    # 2. CRÉATION D'UNE FEUILLE INDIVIDUELLE POUR CHAQUE CHANTIER
+    # Onglets séparés par chantier
     for ch_nom, ch_df in chantiers_group:
-        # Nom de l'onglet sécurisé (max 31 caractères sans caractères interdits)
         safe_title = ch_nom.replace("/", "-").replace("\\", "-").replace("?", "").replace("*", "")[:28]
         ws_ch = wb.create_sheet(title=safe_title)
         ws_ch.views.sheetView[0].showGridLines = True
 
-        # En-tête officiel du chantier
         ws_ch.merge_cells("A1:I1")
         ws_ch["A1"] = f"CHANTIER : {ch_nom.upper()} — BILAN MENSUEL ({mois_label.upper()})"
         ws_ch["A1"].font = Font(name="Calibri", size=12, bold=True, color="FFFFFF")
@@ -333,7 +322,6 @@ def generer_classeur_par_chantier_separe(df_mois, mois_label):
         ws_ch["A1"].alignment = Alignment(horizontal="center", vertical="center")
         ws_ch.row_dimensions[1].height = 36
 
-        # Indicateurs du chantier
         ch_ouvriers_cnt = ch_df["Ouvrier"].nunique()
         ch_p_cnt = sum(1 for v in ch_df["Statut"] if "Présent" in str(v))
         ch_d_cnt = sum(1 for v in ch_df["Statut"] if "1/2" in str(v))
@@ -350,7 +338,6 @@ def generer_classeur_par_chantier_separe(df_mois, mois_label):
         ws_ch["D2"].alignment = Alignment(horizontal="right")
         ws_ch.row_dimensions[2].height = 20
 
-        # En-tête des colonnes pour ce chantier
         headers_ch = ["Date", "Conducteur", "Ouvrier", "Statut", "Tâche / Corps d'état", "Production", "Qualité", "Observation", "Score"]
         ws_ch.append([])
         ws_ch.append(headers_ch)
@@ -363,7 +350,6 @@ def generer_classeur_par_chantier_separe(df_mois, mois_label):
             c.alignment = Alignment(horizontal="center", vertical="center")
             c.border = thin_border
 
-        # Lignes de pointage de ce chantier
         row_ch_idx = 5
         for _, r in ch_df.iterrows():
             prod_val = "Bricol" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-")
@@ -398,7 +384,7 @@ def generer_classeur_par_chantier_separe(df_mois, mois_label):
     return output.getvalue()
 
 
-# --- NOTIFICATIONS STREAMLIT ---
+# --- GESTION NOTIFICATIONS ---
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
 
@@ -565,7 +551,7 @@ elif menu_general == f"👷 Espace {nom_c2}":
     interface_saisie_conducteur("c2", nom_c2)
 
 # ==============================================================================
-# ESPACE ADMIN (AVEC SÉPARATION DES CHANTIERS)
+# ESPACE ADMIN (AVEC TABLEAUX ORGANISÉS ET PROPRES)
 # ==============================================================================
 elif menu_general == "🔐 Espace Admin (Direction)":
     st.subheader("Accès Sécurisé - Administration")
@@ -604,7 +590,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
             st.session_state["admin_active_module"] = None
 
         MODULES_ADMIN = [
-            ("mod_rapport", "📊 Registre & Bilan par Chantier", "Séparer chaque chantier sur un onglet Excel indépendant"),
+            ("mod_rapport", "📊 Registre & Bilan Mensuel Organisé", "Tableaux organisés, synthèse par chantier et export Excel"),
             ("mod_chantiers_taches", "🏗️ Chantiers & Corps d'état", "Ajouter, modifier ou supprimer des chantiers et tâches"),
             ("mod_profils", "👥 Profils & Photos", "Gérer les noms et photos des Conducteurs et Ouvriers"),
             ("mod_chantiers_cond", "👷 Chantiers / Conducteurs", "Attribuer les chantiers sous la responsabilité de chacun"),
@@ -652,10 +638,10 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
             st.markdown("---")
 
-            # MODULE REGISTRE ET EXPORTATION AVEC CHANTIERS SÉPARÉS
+            # MODULE REGISTRE & BILAN MENSUEL ULTRA BIEN ORGANISÉ
             if mod_actuel == "mod_rapport":
-                st.markdown("### 📊 Registre & Exportation : Séparation par Chantier")
-                tab_mois, tab_corr = st.tabs(["📅 Bilan Mensuel (Chantiers Séparés)", "✏️ Corriger une Saisie"])
+                st.markdown("### 📊 Bilan Mensuel & Registre Organisé par Projet")
+                tab_mois, tab_corr = st.tabs(["📅 Bilan Mensuel & Synthèse", "✏️ Corriger une Saisie"])
 
                 conn = get_db_connection()
                 query_admin = """
@@ -674,7 +660,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                         p.score AS [Score]
                     FROM pointages p
                     LEFT JOIN workers w ON p.worker_id = w.id
-                    ORDER BY p.date_jour DESC, p.id DESC
+                    ORDER BY p.chantier ASC, p.date_jour DESC, p.id DESC
                 """
                 df_all = pd.read_sql_query(query_admin, conn)
                 conn.close()
@@ -685,59 +671,94 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                     else:
                         df_all["Mois_Annee"] = df_all["Date"].str.slice(0, 7)
                         mois_disponibles = sorted(df_all["Mois_Annee"].unique().tolist(), reverse=True)
-                        
-                        col_m1, col_m2 = st.columns(2)
-                        with col_m1:
-                            mois_choisi = st.selectbox("📅 Sélectionner le Mois :", mois_disponibles)
-                        with col_m2:
-                            mode_vue = st.radio("Mode d'affichage :", ["Tous les Chantiers (Feuilles Séparées)", "Filtrer un Chantier Précis"], horizontal=True)
+
+                        c_m1, c_m2 = st.columns([1, 2])
+                        with c_m1:
+                            mois_choisi = st.selectbox("📅 Mois d'analyse :", mois_disponibles)
+                        with c_m2:
+                            filtre_chantier_vue = st.selectbox("📍 Filtrer par Chantier :", ["Tous les chantiers"] + sorted(df_all["Chantier"].unique().tolist()))
 
                         df_mois_actuel = df_all[df_all["Mois_Annee"] == mois_choisi].copy()
+                        if filtre_chantier_vue != "Tous les chantiers":
+                            df_mois_actuel = df_mois_actuel[df_mois_actuel["Chantier"] == filtre_chantier_vue]
 
-                        if mode_vue == "Filtrer un Chantier Précis":
-                            ch_dispos_mois = sorted(df_mois_actuel["Chantier"].unique().tolist())
-                            ch_cible_filtre = st.selectbox("📍 Chantier sélectionné :", ch_dispos_mois)
-                            df_mois_actuel = df_mois_actuel[df_mois_actuel["Chantier"] == ch_cible_filtre]
+                        # Cartouches KPIs généraux
+                        total_ouv_actifs = df_mois_actuel["Ouvrier"].nunique()
+                        total_pres_cnt = sum(1 for v in df_mois_actuel["Statut"] if "Présent" in str(v))
+                        total_demi_cnt = sum(1 for v in df_mois_actuel["Statut"] if "1/2" in str(v))
+                        total_abs_cnt = sum(1 for v in df_mois_actuel["Statut"] if "Absence" in str(v))
+                        total_jours_payes = total_pres_cnt + (total_demi_cnt * 0.5)
+                        total_m2 = df_mois_actuel[(df_mois_actuel["Unite"] == "m²") & (df_mois_actuel["Quantite"] > 0)]["Quantite"].sum()
 
-                        st.markdown(f"#### 📌 Données de **{mois_choisi}** (`{len(df_mois_actuel)}` pointages enregistrés sur `{df_mois_actuel['Chantier'].nunique()}` chantier(s))")
-
-                        # Indicateurs
-                        c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("Chantiers Concernés", f"{df_mois_actuel['Chantier'].nunique()}")
-                        c2.metric("Ouvriers Actifs", f"{df_mois_actuel['Ouvrier'].nunique()}")
-                        
-                        p_c = sum(1 for v in df_mois_actuel["Statut"] if "Présent" in str(v))
-                        d_c = sum(1 for v in df_mois_actuel["Statut"] if "1/2" in str(v))
-                        c3.metric("Jours Payés", f"{p_c + (d_c * 0.5)} j")
-
-                        m2_tot = df_mois_actuel[(df_mois_actuel["Unite"] == "m²") & (df_mois_actuel["Quantite"] > 0)]["Quantite"].sum()
-                        c4.metric("Production (m²)", f"{m2_tot:.1f} m²")
+                        k1, k2, k3, k4 = st.columns(4)
+                        k1.metric("Ouvriers Actifs", f"{total_ouv_actifs}")
+                        k2.metric("Total Jours Validés", f"{total_jours_payes} j")
+                        k3.metric("Absences Signalées", f"{total_abs_cnt}")
+                        k4.metric("Production Étanchéité", f"{total_m2:.1f} m²")
 
                         st.markdown("---")
-                        st.markdown("#### 📥 Téléchargements Spécialisés")
 
-                        if OPENPYXL_DISPO:
-                            excel_separe = generer_classeur_par_chantier_separe(df_mois_actuel, f"{mois_choisi}")
+                        # TABLEAU 1 : SYNTHÈSE GLOBALE PAR CHANTIER
+                        st.markdown("#### 1. Synthèse Globale par Chantier")
+                        ch_synth = []
+                        for ch_name, grp in df_mois_actuel.groupby("Chantier"):
+                            p_c = sum(1 for v in grp["Statut"] if "Présent" in str(v))
+                            d_c = sum(1 for v in grp["Statut"] if "1/2" in str(v))
+                            a_c = sum(1 for v in grp["Statut"] if "Absence" in str(v))
+                            j_val = p_c + (d_c * 0.5)
+                            m2_val = grp[(grp["Unite"] == "m²") & (grp["Quantite"] > 0)]["Quantite"].sum()
+
+                            ch_synth.append({
+                                "Chantier": ch_name,
+                                "Effectif Actif": grp["Ouvrier"].nunique(),
+                                "Saisies": len(grp),
+                                "Présences (J)": p_c,
+                                "1/2 Journées": d_c,
+                                "Absences": a_c,
+                                "Total Jours Validés": f"{j_val} j",
+                                "Production (m²)": f"{m2_val:.1f} m²"
+                            })
+
+                        df_ch_synth = pd.DataFrame(ch_synth)
+                        st.dataframe(df_ch_synth, use_container_width=True, hide_index=True)
+
+                        st.markdown("---")
+
+                        # TABLEAU 2 : REGISTRE DÉTAILLÉ PAR CHANTIER
+                        st.markdown("#### 2. Registre Détaillé des Pointages (Organisé par Projet)")
+                        df_vue_detail = df_mois_actuel.copy()
+                        df_vue_detail["Production"] = df_vue_detail.apply(
+                            lambda r: "Bricol" if r["Unite"] == "Sans métrage" else (f"{r['Quantite']} {r['Unite']}" if r["Quantite"] > 0 else "-"),
+                            axis=1
+                        )
+                        colonnes_finales = ["Chantier", "Date", "Conducteur", "Ouvrier", "Statut", "Tâche", "Production", "Qualité", "Observation", "Score"]
+                        st.dataframe(df_vue_detail[colonnes_finales], use_container_width=True, hide_index=True)
+
+                        st.markdown("#### 📥 Téléchargements du Rapport Mensuel")
+                        col_dl1, col_dl2 = st.columns(2)
+
+                        with col_dl1:
+                            if OPENPYXL_DISPO:
+                                excel_separe = generer_classeur_par_chantier_separe(df_mois_actuel, mois_choisi)
+                                st.download_button(
+                                    f"📗 Télécharger le Classeur Excel (.xlsx) avec Feuilles Séparées",
+                                    data=excel_separe,
+                                    file_name=f"bilan_chantiers_{mois_choisi}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+                            else:
+                                st.caption("💡 Le CSV ci-contre s'ouvre parfaitement dans Excel avec séparateur `;`.")
+
+                        with col_dl2:
+                            csv_propre = df_vue_detail[colonnes_finales].to_csv(index=False, sep=";", encoding="utf-8-sig")
                             st.download_button(
-                                f"📗 Télécharger le Classeur Excel avec Feuilles Séparées par Chantier (.xlsx)",
-                                data=excel_separe,
-                                file_name=f"bilan_par_chantier_{mois_choisi}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
-                        else:
-                            csv_propre = df_mois_actuel.to_csv(index=False, sep=";", encoding="utf-8-sig")
-                            st.download_button(
-                                f"📥 Télécharger l'export CSV ({mois_choisi})",
+                                f"📥 Télécharger le Fichier CSV (Excel Séparateur ;)",
                                 data=csv_propre.encode("utf-8-sig"),
-                                file_name=f"bilan_{mois_choisi}.csv",
+                                file_name=f"registre_{mois_choisi}.csv",
                                 mime="text/csv",
                                 use_container_width=True
                             )
-
-                        st.markdown("##### Détail des Saisies :")
-                        df_apercu = df_mois_actuel[["Date", "Chantier", "Conducteur", "Ouvrier", "Statut", "Tâche", "Quantite", "Unite", "Qualité", "Score"]].copy()
-                        st.dataframe(df_apercu, use_container_width=True, hide_index=True)
 
                 with tab_corr:
                     st.markdown("##### Rectifier ou supprimer une saisie erronée")
@@ -1030,7 +1051,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
                             chantiers_options = get_all_chantiers()
                             chantier_init = st.selectbox("Chantier initial :", chantiers_options, key="sel_new_worker_ch_tab")
                         with col_add2:
-                            photo_nouvel_ouvrier = st.file_uploader("Photo (Optionnel) :", type=["jpg", "jpeg", "png"], key="upload_new_worker_photo_tab")
+                            photo_nouvel_ouvrier = st.file_uploader("Photo (Optionnel) :", type=["jpg", "jpeg", "png"], key=upload_new_worker_photo_tab)
 
                         if st.button("➕ Ajouter l'ouvrier", type="primary", key="btn_add_worker_tab"):
                             nom_nettoye = nom_nouveau.strip()
