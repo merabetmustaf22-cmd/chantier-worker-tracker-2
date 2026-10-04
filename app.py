@@ -19,7 +19,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# CSS Mobile & Desktop m3a des cadres bien définis w séparés
 st.markdown("""
 <style>
     @media (max-width: 768px) {
@@ -42,7 +41,6 @@ st.markdown("""
         }
     }
     
-    /* Le Cadre principal pour chaque ouvrier */
     .worker-frame {
         background-color: #111827;
         border: 1.5px solid #374151;
@@ -294,7 +292,6 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     thin_side = Side(style='thin', color=BORDER_COLOR)
     cell_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
     
-    # FEUILLE 1 : Synthèse Chantiers
     ws_sum = wb.active
     ws_sum.title = "Synthèse Chantiers"
     ws_sum.views.sheetView[0].showGridLines = True
@@ -365,7 +362,6 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     for col_lettre, larg in largeurs_sum.items():
         ws_sum.column_dimensions[col_lettre].width = larg
 
-    # FEUILLE 2 : Bilan & Primes Ouvriers
     ws_ouv = wb.create_sheet(title="Bilan & Primes Ouvriers")
     ws_ouv.views.sheetView[0].showGridLines = True
     
@@ -485,7 +481,6 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         if col_idx in [3, 4, 5, 6, 7]:
             c.alignment = Alignment(horizontal="center", vertical="center")
 
-    # FEUILLES 3+ : Individuelles par Chantier
     headers_detail = ["Date", "Conducteur", "Ouvrier", "Statut", "Corps d'état / Tâche", "Production", "Contrôle Qualité", "Observation / Rendement", "Score"]
     largeurs_detail = {
         "A": 14, "B": 18, "C": 26, "D": 20, "E": 28,
@@ -606,14 +601,13 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     return buf.getvalue()
 
 
-# Notifications
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
 
 if st.session_state["sync_notif"]:
     st.success(st.session_state["sync_notif"])
 
-st.title("🏗️ Suivi Chantier & Étanchéité")
+st.title("🏗️️ Suivi Chantier & Étanchéité")
 
 dict_conducteurs = get_conducteurs_dict()
 nom_c1 = dict_conducteurs.get("c1", "Conducteur 1")
@@ -683,7 +677,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     if presence_data_key not in st.session_state:
         st.session_state[presence_data_key] = {}
 
-    # ÉTAPE 1 : POINTAGE (CADRE POUR CHAQUE OUVRIER)
+    # ÉTAPE 1 : POINTAGE DANS LE CADRE UNIQUE PAR OUVRIER
     if st.session_state[step_key] == 1:
         st.markdown("### 📋 Étape 1 : Présence & Absences")
         st.caption("Sélectionnez le statut de chaque ouvrier puis passez à l'étape suivante.")
@@ -693,35 +687,35 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             w_id = row['id']
             w_nom = row['nom']
 
-            # DEBUT DU CADRE INDIVIDUEL OUVRIER
-            st.markdown(f"""
-            <div class='worker-frame'>
-                <div class='worker-header'>
-                    <div>{get_avatar_html(w_nom)}</div>
-                    <div>
-                        <h3 style='margin:0; font-size:1.15rem; color:#F9FAFB;'>{w_nom}</h3>
-                        <span style='font-size:0.8rem; color:#9CA3AF;'>ID: #{w_id} • {chantier_choisi}</span>
+            # Conteneur unifié
+            with st.container():
+                st.markdown(f"""
+                <div class='worker-frame'>
+                    <div class='worker-header'>
+                        <div>{get_avatar_html(w_nom)}</div>
+                        <div>
+                            <h3 style='margin:0; font-size:1.15rem; color:#F9FAFB;'>{w_nom}</h3>
+                            <span style='font-size:0.8rem; color:#9CA3AF;'>ID: #{w_id} • {chantier_choisi}</span>
+                        </div>
                     </div>
-                </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
-            statut_val = st.selectbox(
-                "Statut de présence :",
-                [
-                    "Présent",
-                    "1/2 journée",
-                    "Absence Autorisée",
-                    "Absence Non Autorisée (Injustifiée)"
-                ],
-                key=f"st1_{conducteur_id_tag}_{w_id}"
-            )
+                statut_val = st.selectbox(
+                    "Statut de présence :",
+                    [
+                        "Présent",
+                        "1/2 journée",
+                        "Absence Autorisée",
+                        "Absence Non Autorisée (Injustifiée)"
+                    ],
+                    key=f"st1_{conducteur_id_tag}_{w_id}"
+                )
 
-            motif_abs = ""
-            if "Absence" in statut_val:
-                motif_abs = st.text_input("Motif de l'absence :", placeholder="Ex: congé, maladie, arrêt...", key=f"abs_m_{conducteur_id_tag}_{w_id}")
+                motif_abs = ""
+                if "Absence" in statut_val:
+                    motif_abs = st.text_input("Motif de l'absence :", placeholder="Ex: congé, maladie, arrêt...", key=f"abs_m_{conducteur_id_tag}_{w_id}")
 
-            # FIN DU CADRE
-            st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
 
             presence_temp[w_id] = {
                 "nom": w_nom,
@@ -734,7 +728,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st.session_state[step_key] = 2
             st.rerun()
 
-    # ÉTAPE 2 : PRODUCTION (CADRE POUR CHAQUE OUVRIER PRÉSENT)
+    # ÉTAPE 2 : PRODUCTION & CONTRÔLE DANS LE CADRE UNIQUE PAR OUVRIER
     elif st.session_state[step_key] == 2:
         st.markdown("### 🔨 Étape 2 : Production & Appréciation")
         st.caption("Saisie uniquement pour les présents. Les absences sont validées directement.")
@@ -754,56 +748,54 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st_val = infos_p["statut"]
 
             if "Présent" in st_val or "1/2" in st_val:
-                # DEBUT DU CADRE INDIVIDUEL OUVRIER
-                st.markdown(f"""
-                <div class='worker-frame'>
-                    <div class='worker-header'>
-                        <div>{get_avatar_html(w_nom)}</div>
-                        <div>
-                            <h3 style='margin:0; font-size:1.15rem; color:#F9FAFB;'>{w_nom}</h3>
-                            <span style='font-size:0.85rem; color:#10B981; font-weight:600;'>🟢 Statut : {st_val}</span>
+                with st.container():
+                    st.markdown(f"""
+                    <div class='worker-frame'>
+                        <div class='worker-header'>
+                            <div>{get_avatar_html(w_nom)}</div>
+                            <div>
+                                <h3 style='margin:0; font-size:1.15rem; color:#F9FAFB;'>{w_nom}</h3>
+                                <span style='font-size:0.85rem; color:#10B981; font-weight:600;'>🟢 Statut : {st_val}</span>
+                            </div>
                         </div>
-                    </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
 
-                tache_val = st.selectbox("Corps d'état / Tâche :", toutes_les_taches, key=f"tch2_{conducteur_id_tag}_{w_id}")
-                est_bricol_defaut = ("BRICOL" in tache_val.upper()) or (tache_val in ["DIVERS", "nettoyage", "PONSAGE"])
-                type_travail = st.selectbox("Type d'activité :", ["Métrage (m² / ml)", "Bricolage / Sans métrage"], index=1 if est_bricol_defaut else 0, key=f"typ2_{conducteur_id_tag}_{w_id}")
+                    tache_val = st.selectbox("Corps d'état / Tâche :", toutes_les_taches, key=f"tch2_{conducteur_id_tag}_{w_id}")
+                    est_bricol_defaut = ("BRICOL" in tache_val.upper()) or (tache_val in ["DIVERS", "nettoyage", "PONSAGE"])
+                    type_travail = st.selectbox("Type d'activité :", ["Métrage (m² / ml)", "Bricolage / Sans métrage"], index=1 if est_bricol_defaut else 0, key=f"typ2_{conducteur_id_tag}_{w_id}")
 
-                if type_travail == "Métrage (m² / ml)":
-                    qte_val = st.number_input("Métré réalisé :", min_value=0.0, step=1.0, value=25.0, key=f"qte2_{conducteur_id_tag}_{w_id}")
-                    unite_val = "m²"
-                else:
-                    unite_val = "Sans métrage"
-                    qte_val = 1.0
+                    if type_travail == "Métrage (m² / ml)":
+                        qte_val = st.number_input("Métré réalisé :", min_value=0.0, step=1.0, value=25.0, key=f"qte2_{conducteur_id_tag}_{w_id}")
+                        unite_val = "m²"
+                    else:
+                        unite_val = "Sans métrage"
+                        qte_val = 1.0
 
-                c_ev1, c_ev2 = st.columns(2)
-                with c_ev1:
-                    eval_ouvrier = st.selectbox(
-                        "Rendement / Implication :",
-                        [
-                            "Très bon rendement (Excellent)",
-                            "Bon travail (Régulier)",
-                            "Rendement moyen (Moyen)",
-                            "Faible rendement (À surveiller)"
-                        ],
-                        key=f"eval_kh_{conducteur_id_tag}_{w_id}"
-                    )
-                with c_ev2:
-                    apprec_qualite = st.selectbox(
-                        "Qualité d'exécution :",
-                        [
-                            "Conforme / Soigné",
-                            "Acceptable",
-                            "Non conforme"
-                        ],
-                        key=f"qual_{conducteur_id_tag}_{w_id}"
-                    )
+                    c_ev1, c_ev2 = st.columns(2)
+                    with c_ev1:
+                        eval_ouvrier = st.selectbox(
+                            "Rendement / Implication :",
+                            [
+                                "Très bon rendement (Excellent)",
+                                "Bon travail (Régulier)",
+                                "Rendement moyen (Moyen)",
+                                "Faible rendement (À surveiller)"
+                            ],
+                            key=f"eval_kh_{conducteur_id_tag}_{w_id}"
+                        )
+                    with c_ev2:
+                        apprec_qualite = st.selectbox(
+                            "Qualité d'exécution :",
+                            [
+                                "Conforme / Soigné",
+                                "Acceptable",
+                                "Non conforme"
+                            ],
+                            key=f"qual_{conducteur_id_tag}_{w_id}"
+                        )
 
-                obs_val = st.text_input("Observation libre :", placeholder="Ex: terrasse sud, acrotères...", key=f"obs2_{conducteur_id_tag}_{w_id}")
-                
-                # FIN DU CADRE
-                st.markdown("</div>", unsafe_allow_html=True)
+                    obs_val = st.text_input("Observation libre :", placeholder="Ex: terrasse sud, acrotères...", key=f"obs2_{conducteur_id_tag}_{w_id}")
+                    st.markdown("</div>", unsafe_allow_html=True)
 
                 donnees_finales[w_id] = {
                     "statut": st_val,
@@ -1280,7 +1272,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                 with tab_ouv:
                     df_w_m = get_workers_df()
-                    sub_ed, sub_ad, sub_dl = st.tabs(["✏ Modifier", "➕ Ajouter", "🗑️️ Supprimer"])
+                    sub_ed, sub_ad, sub_dl = st.tabs(["✏ Modifier", "➕ Ajouter", "🗑 Supprimer"])
                     with sub_ed:
                         o_sel = st.selectbox("Sélectionner l'ouvrier :", df_w_m["nom"].tolist(), key="sel_ouv_cfg")
                         ph_o = get_photo_path(o_sel)
