@@ -2,6 +2,7 @@ import os
 import io
 import glob
 import sqlite3
+import base64
 from datetime import date, datetime
 import pandas as pd
 from PIL import Image
@@ -40,12 +41,33 @@ st.markdown("""
         }
     }
     .worker-card {
-        background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
         padding: 12px;
         margin-bottom: 14px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .avatar-img {
+        width: 68px !important;
+        height: 68px !important;
+        border-radius: 50% !important;
+        object-fit: cover !important;
+        border: 2px solid #3B82F6 !important;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+        display: block;
+        margin: auto;
+    }
+    .avatar-placeholder {
+        width: 68px;
+        height: 68px;
+        border-radius: 50%;
+        background: #1E293B;
+        border: 2px solid #64748B;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 32px;
+        margin: auto;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -212,6 +234,16 @@ def get_photo_path(identifiant):
             return p
     return None
 
+def get_avatar_html(identifiant):
+    path = get_photo_path(identifiant)
+    if path and os.path.exists(path):
+        with open(path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("utf-8")
+        ext = path.split(".")[-1].lower()
+        mime = "jpeg" if ext in ["jpg", "jpeg"] else "png"
+        return f'<img src="data:image/{mime};base64,{data}" class="avatar-img" />'
+    return '<div class="avatar-placeholder">👷</div>'
+
 # ==============================================================================
 # GÉNÉRATEUR EXCEL AVEC FEUILLE BILAN OUVRIERS & PRIMES
 # ==============================================================================
@@ -319,7 +351,7 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         ws_sum.column_dimensions[col_lettre].width = larg
 
     # -------------------------------------------------------------------------
-    # FEUILLE 2 : 👥 BILAN & ATTRIBUTION DES PRIMES PAR OUVRIER (NOUVEAU)
+    # FEUILLE 2 : BILAN & ATTRIBUTION DES PRIMES PAR OUVRIER
     # -------------------------------------------------------------------------
     ws_ouv = wb.create_sheet(title="Bilan & Primes Ouvriers")
     ws_ouv.views.sheetView[0].showGridLines = True
@@ -370,11 +402,9 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         
         prod_m2 = w_grp[(w_grp["Unite"] == "m²") & (w_grp["Quantite"] > 0)]["Quantite"].sum()
         
-        # Calcul du score moyen sur les jours notés
         scores_valides = pd.to_numeric(w_grp["Score"], errors='coerce').dropna()
         score_moy = scores_valides.mean() if not scores_valides.empty else 0.0
         
-        # Règle d'éligibilité aux primes (BTP Étanchéité)
         if abs_injust > 0:
             elig_prime = "Non Éligible"
             prop_decision = "Pénalité (Absence injustifiée)"
@@ -414,7 +444,6 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
             else:
                 c.alignment = Alignment(horizontal="left", vertical="center")
                 
-            # Couleurs dynamiques d'évaluation des primes
             if col_idx == 8:
                 if "A+" in elig_prime or "Maximale" in elig_prime:
                     c.fill = PatternFill(start_color=VERT_BG, end_color=VERT_BG, fill_type="solid")
@@ -433,7 +462,6 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         tot_m2_ouv += prod_m2
         r_ouv_idx += 1
 
-    # Ligne Total Ouvriers
     ws_ouv.append(["TOTAL / MOYENNE", f"{df_data['Ouvrier'].nunique()} Ouvriers", tot_j_ouv, "-", "-", round(tot_m2_ouv, 1), "-", "-", "-", ""])
     ws_ouv.row_dimensions[r_ouv_idx].height = 26
     for col_idx in range(1, len(headers_ouvriers) + 1):
@@ -449,7 +477,7 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     # -------------------------------------------------------------------------
     headers_detail = ["Date", "Conducteur", "Ouvrier", "Statut", "Corps d'état / Tâche", "Production", "Contrôle Qualité", "Observation / Rendement", "Score"]
     largeurs_detail = {
-        "A": 14, "B": 18, "C": 26, "D": 20, "E": 28,
+        "A": 14, "B": 18, "C": 26, "D": 22, "E": 28,
         "F": 16, "G": 22, "H": 38, "I": 12
     }
 
@@ -521,7 +549,6 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
                 else:
                     c.alignment = Alignment(horizontal="left", vertical="center")
                 
-                # Coloration
                 if col_idx == 4:
                     if "Présent" in statut_aff:
                         c.fill = PatternFill(start_color=VERT_BG, end_color=VERT_BG, fill_type="solid")
@@ -568,14 +595,13 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     return buf.getvalue()
 
 
-# Notifications
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
 
 if st.session_state["sync_notif"]:
     st.success(st.session_state["sync_notif"])
 
-st.title("🏗️ Suivi Chantier & Étanchéité")
+st.title("🏗️️ Suivi Chantier & Étanchéité")
 
 dict_conducteurs = get_conducteurs_dict()
 nom_c1 = dict_conducteurs.get("c1", "Conducteur 1")
@@ -653,17 +679,13 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
         for _, row in equipe_active.iterrows():
             w_id = row['id']
             w_nom = row['nom']
-            photo_p = get_photo_path(w_nom)
 
             st.markdown("<div class='worker-card'>", unsafe_allow_html=True)
-            c_av, c_tx = st.columns([1, 4])
+            c_av, c_tx = st.columns([1.2, 3.8])
             with c_av:
-                if photo_p:
-                    st.image(photo_p, width=50)
-                else:
-                    st.markdown("<div style='font-size:30px;text-align:center;'>👷</div>", unsafe_allow_html=True)
+                st.markdown(get_avatar_html(w_nom), unsafe_allow_html=True)
             with c_tx:
-                st.markdown(f"**{w_nom}**")
+                st.markdown(f"<h3 style='margin:0; font-size:1.15rem;'>{w_nom}</h3>", unsafe_allow_html=True)
 
             statut_val = st.selectbox(
                 "Statut de présence :",
@@ -711,16 +733,12 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st_val = infos_p["statut"]
 
             if "Présent" in st_val or "1/2" in st_val:
-                photo_p = get_photo_path(w_nom)
                 st.markdown("<div class='worker-card'>", unsafe_allow_html=True)
-                c_av, c_tx = st.columns([1, 4])
+                c_av, c_tx = st.columns([1.2, 3.8])
                 with c_av:
-                    if photo_p:
-                        st.image(photo_p, width=50)
-                    else:
-                        st.markdown("<div style='font-size:30px;text-align:center;'>👷</div>", unsafe_allow_html=True)
+                    st.markdown(get_avatar_html(w_nom), unsafe_allow_html=True)
                 with c_tx:
-                    st.markdown(f"**{w_nom}** (`{st_val}`)")
+                    st.markdown(f"<h3 style='margin:0; font-size:1.15rem;'>{w_nom}</h3><span style='font-size:0.85rem; color:#64748B;'>Statut: {st_val}</span>", unsafe_allow_html=True)
 
                 tache_val = st.selectbox("Corps d'état / Tâche :", toutes_les_taches, key=f"tch2_{conducteur_id_tag}_{w_id}")
                 est_bricol_defaut = ("BRICOL" in tache_val.upper()) or (tache_val in ["DIVERS", "nettoyage", "PONSAGE"])
