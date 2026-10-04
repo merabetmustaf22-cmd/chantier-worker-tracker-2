@@ -19,6 +19,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# CSS Mobile & Desktop m3a des cadres bien définis w séparés
 st.markdown("""
 <style>
     @media (max-width: 768px) {
@@ -40,33 +41,52 @@ st.markdown("""
             margin-bottom: 4px !important;
         }
     }
-    .worker-card {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 14px;
-        padding: 12px;
-        margin-bottom: 14px;
+    
+    /* Le Cadre principal pour chaque ouvrier */
+    .worker-frame {
+        background-color: #111827;
+        border: 1.5px solid #374151;
+        border-radius: 16px;
+        padding: 16px 14px;
+        margin-bottom: 22px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+        transition: all 0.2s ease-in-out;
     }
+    
+    .worker-frame:hover {
+        border-color: #3B82F6;
+    }
+
+    .worker-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #1F2937;
+    }
+
     .avatar-img {
-        width: 68px !important;
-        height: 68px !important;
+        width: 65px !important;
+        height: 65px !important;
         border-radius: 50% !important;
         object-fit: cover !important;
         border: 2px solid #3B82F6 !important;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
         display: block;
         margin: auto;
     }
+
     .avatar-placeholder {
-        width: 68px;
-        height: 68px;
+        width: 65px;
+        height: 65px;
         border-radius: 50%;
-        background: #1E293B;
+        background: #1F2937;
         border: 2px solid #64748B;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 32px;
+        font-size: 30px;
         margin: auto;
     }
 </style>
@@ -244,9 +264,6 @@ def get_avatar_html(identifiant):
         return f'<img src="data:image/{mime};base64,{data}" class="avatar-img" />'
     return '<div class="avatar-placeholder">👷</div>'
 
-# ==============================================================================
-# GÉNÉRATEUR EXCEL AVEC FEUILLE BILAN OUVRIERS & PRIMES
-# ==============================================================================
 def generer_classeur_pro_excel(df_data, titre_rapport):
     wb = openpyxl.Workbook()
     
@@ -277,9 +294,7 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     thin_side = Side(style='thin', color=BORDER_COLOR)
     cell_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
     
-    # -------------------------------------------------------------------------
-    # FEUILLE 1 : SYNTHÈSE GÉNÉRALE DES CHANTIERS
-    # -------------------------------------------------------------------------
+    # FEUILLE 1 : Synthèse Chantiers
     ws_sum = wb.active
     ws_sum.title = "Synthèse Chantiers"
     ws_sum.views.sheetView[0].showGridLines = True
@@ -350,9 +365,7 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     for col_lettre, larg in largeurs_sum.items():
         ws_sum.column_dimensions[col_lettre].width = larg
 
-    # -------------------------------------------------------------------------
-    # FEUILLE 2 : BILAN & ATTRIBUTION DES PRIMES PAR OUVRIER
-    # -------------------------------------------------------------------------
+    # FEUILLE 2 : Bilan & Primes Ouvriers
     ws_ouv = wb.create_sheet(title="Bilan & Primes Ouvriers")
     ws_ouv.views.sheetView[0].showGridLines = True
     
@@ -472,12 +485,10 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
         if col_idx in [3, 4, 5, 6, 7]:
             c.alignment = Alignment(horizontal="center", vertical="center")
 
-    # -------------------------------------------------------------------------
-    # FEUILLES 3+ : INDIVIDUELLES PAR CHANTIER
-    # -------------------------------------------------------------------------
+    # FEUILLES 3+ : Individuelles par Chantier
     headers_detail = ["Date", "Conducteur", "Ouvrier", "Statut", "Corps d'état / Tâche", "Production", "Contrôle Qualité", "Observation / Rendement", "Score"]
     largeurs_detail = {
-        "A": 14, "B": 18, "C": 26, "D": 22, "E": 28,
+        "A": 14, "B": 18, "C": 26, "D": 20, "E": 28,
         "F": 16, "G": 22, "H": 38, "I": 12
     }
 
@@ -595,13 +606,14 @@ def generer_classeur_pro_excel(df_data, titre_rapport):
     return buf.getvalue()
 
 
+# Notifications
 if "sync_notif" not in st.session_state:
     st.session_state["sync_notif"] = None
 
 if st.session_state["sync_notif"]:
     st.success(st.session_state["sync_notif"])
 
-st.title("🏗️️ Suivi Chantier & Étanchéité")
+st.title("🏗️ Suivi Chantier & Étanchéité")
 
 dict_conducteurs = get_conducteurs_dict()
 nom_c1 = dict_conducteurs.get("c1", "Conducteur 1")
@@ -671,6 +683,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
     if presence_data_key not in st.session_state:
         st.session_state[presence_data_key] = {}
 
+    # ÉTAPE 1 : POINTAGE (CADRE POUR CHAQUE OUVRIER)
     if st.session_state[step_key] == 1:
         st.markdown("### 📋 Étape 1 : Présence & Absences")
         st.caption("Sélectionnez le statut de chaque ouvrier puis passez à l'étape suivante.")
@@ -680,12 +693,17 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             w_id = row['id']
             w_nom = row['nom']
 
-            st.markdown("<div class='worker-card'>", unsafe_allow_html=True)
-            c_av, c_tx = st.columns([1.2, 3.8])
-            with c_av:
-                st.markdown(get_avatar_html(w_nom), unsafe_allow_html=True)
-            with c_tx:
-                st.markdown(f"<h3 style='margin:0; font-size:1.15rem;'>{w_nom}</h3>", unsafe_allow_html=True)
+            # DEBUT DU CADRE INDIVIDUEL OUVRIER
+            st.markdown(f"""
+            <div class='worker-frame'>
+                <div class='worker-header'>
+                    <div>{get_avatar_html(w_nom)}</div>
+                    <div>
+                        <h3 style='margin:0; font-size:1.15rem; color:#F9FAFB;'>{w_nom}</h3>
+                        <span style='font-size:0.8rem; color:#9CA3AF;'>ID: #{w_id} • {chantier_choisi}</span>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
 
             statut_val = st.selectbox(
                 "Statut de présence :",
@@ -702,7 +720,9 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             if "Absence" in statut_val:
                 motif_abs = st.text_input("Motif de l'absence :", placeholder="Ex: congé, maladie, arrêt...", key=f"abs_m_{conducteur_id_tag}_{w_id}")
 
+            # FIN DU CADRE
             st.markdown("</div>", unsafe_allow_html=True)
+
             presence_temp[w_id] = {
                 "nom": w_nom,
                 "statut": statut_val,
@@ -714,6 +734,7 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st.session_state[step_key] = 2
             st.rerun()
 
+    # ÉTAPE 2 : PRODUCTION (CADRE POUR CHAQUE OUVRIER PRÉSENT)
     elif st.session_state[step_key] == 2:
         st.markdown("### 🔨 Étape 2 : Production & Appréciation")
         st.caption("Saisie uniquement pour les présents. Les absences sont validées directement.")
@@ -733,12 +754,17 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
             st_val = infos_p["statut"]
 
             if "Présent" in st_val or "1/2" in st_val:
-                st.markdown("<div class='worker-card'>", unsafe_allow_html=True)
-                c_av, c_tx = st.columns([1.2, 3.8])
-                with c_av:
-                    st.markdown(get_avatar_html(w_nom), unsafe_allow_html=True)
-                with c_tx:
-                    st.markdown(f"<h3 style='margin:0; font-size:1.15rem;'>{w_nom}</h3><span style='font-size:0.85rem; color:#64748B;'>Statut: {st_val}</span>", unsafe_allow_html=True)
+                # DEBUT DU CADRE INDIVIDUEL OUVRIER
+                st.markdown(f"""
+                <div class='worker-frame'>
+                    <div class='worker-header'>
+                        <div>{get_avatar_html(w_nom)}</div>
+                        <div>
+                            <h3 style='margin:0; font-size:1.15rem; color:#F9FAFB;'>{w_nom}</h3>
+                            <span style='font-size:0.85rem; color:#10B981; font-weight:600;'>🟢 Statut : {st_val}</span>
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
 
                 tache_val = st.selectbox("Corps d'état / Tâche :", toutes_les_taches, key=f"tch2_{conducteur_id_tag}_{w_id}")
                 est_bricol_defaut = ("BRICOL" in tache_val.upper()) or (tache_val in ["DIVERS", "nettoyage", "PONSAGE"])
@@ -775,6 +801,8 @@ def interface_saisie_conducteur(conducteur_id_tag, default_nom):
                     )
 
                 obs_val = st.text_input("Observation libre :", placeholder="Ex: terrasse sud, acrotères...", key=f"obs2_{conducteur_id_tag}_{w_id}")
+                
+                # FIN DU CADRE
                 st.markdown("</div>", unsafe_allow_html=True)
 
                 donnees_finales[w_id] = {
@@ -1252,7 +1280,7 @@ elif menu_general == "🔐 Espace Admin (Direction)":
 
                 with tab_ouv:
                     df_w_m = get_workers_df()
-                    sub_ed, sub_ad, sub_dl = st.tabs(["✏ Modifier", "➕ Ajouter", "🗑️ Supprimer"])
+                    sub_ed, sub_ad, sub_dl = st.tabs(["✏ Modifier", "➕ Ajouter", "🗑️️ Supprimer"])
                     with sub_ed:
                         o_sel = st.selectbox("Sélectionner l'ouvrier :", df_w_m["nom"].tolist(), key="sel_ouv_cfg")
                         ph_o = get_photo_path(o_sel)
